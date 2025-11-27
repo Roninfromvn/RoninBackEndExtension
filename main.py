@@ -1,18 +1,30 @@
-from fastapi import FastAPI, Depends, HTTPException, Response, Body
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware 
 from sqlmodel import Session
 from app.database import get_session
-from app.content_service import generate_regular_post, generate_story_post, generate_content_by_folder
-from app.config_service import (
-    get_page_config,
-    upsert_page_config,
+from app.content_service import (
+    generate_regular_post,
+    generate_story_post,
     get_all_folders,
-    get_all_page_configs,
+    get_all_configs,
+    save_page_config,
+    test_content_generation,
 )
 from app.drive_service import download_image_from_drive 
-from typing import Dict, Any
+from pydantic import BaseModel
+from typing import Any, List
 
 app = FastAPI(title="Posting Content Server")
+
+
+class ConfigPayload(BaseModel):
+    page_id: str
+    enabled: bool = True
+    folder_ids: List[str] = []
+    schedule: List[str] = []
+    posts_per_slot: int = 1
+    caption_by_folder: Any = {}
+    default_caption: str = ""
 
 # --- CẤU HÌNH CORS ---
 app.add_middleware(
@@ -73,43 +85,27 @@ def get_story_content(page_id: str, session: Session = Depends(get_session)):
     return result
 
 
-# --- API MỚI: QUẢN LÝ CẤU HÌNH ---
 @app.get("/api/config/all")
-def get_all_configs_api(session: Session = Depends(get_session)):
-    return get_all_page_configs(session)
-
-
-@app.get("/api/config/{page_id}")
-def get_config_api(page_id: str, session: Session = Depends(get_session)):
-    config, error = get_page_config(session, page_id)
-    if error:
-        raise HTTPException(status_code=404, detail=error)
-    return config.model_dump()
+def api_get_configs(session: Session = Depends(get_session)):
+    return get_all_configs(session)
 
 
 @app.post("/api/config")
-def update_config_api(
-    page_config_data: Dict[str, Any] = Body(...),
-    session: Session = Depends(get_session),
-):
-    try:
-        updated_config = upsert_page_config(session, page_config_data)
-        return {"success": True, "page_id": updated_config.page_id}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Lỗi cập nhật cấu hình: {e}")
+def api_save_config(payload: ConfigPayload, session: Session = Depends(get_session)):
+    return save_page_config(session, payload.dict())
 
 
 @app.get("/api/folders/all")
-def get_all_folders_api(session: Session = Depends(get_session)):
+def api_get_folders(session: Session = Depends(get_session)):
     return get_all_folders(session)
 
 
 # --- API MỚI: TEST CONTENT LINH ĐỘNG ---
 @app.get("/api/test/content/{folder_id}")
 def get_test_content_api(folder_id: str, session: Session = Depends(get_session)):
-    result = generate_content_by_folder(session, folder_id)
+    result = test_content_generation(session, folder_id)
     if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        return result
     return result
 
 

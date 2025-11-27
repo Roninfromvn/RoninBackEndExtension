@@ -1,8 +1,17 @@
 import random
 import json
+from typing import List
 from sqlmodel import Session, select, func
 # [ĐÃ SỬA] Import thêm Folder để có thể truy vấn tên folder
-from .models import PageConfig, Image, FolderCaption, SwipeLinkUsage, SwipeLink, Folder 
+from .models import (
+    PageConfig,
+    Image,
+    FolderCaption,
+    SwipeLinkUsage,
+    SwipeLink,
+    Folder,
+    Page,
+)
 
 # --- Hàm _get_random_image_for_page (Đã sửa đổi) ---
 # [ĐÃ SỬA] Thêm tham số content_type
@@ -126,4 +135,110 @@ def generate_content_by_folder(session: Session, folder_id: str):
         "image_url": f"http://localhost:3210/api/image/{image.id}",
         "caption": selected_caption,
         "swipe_link": final_link
+    }
+
+
+# --- API PHỤC VỤ CẤU HÌNH (New) ---
+def get_all_folders(session: Session):
+    statement = select(Folder).order_by(Folder.name)
+    folders = session.exec(statement).all()
+
+    result = []
+    for folder in folders:
+        # Logic chuẩn: Dựa vào hậu tố _STORY để phân loại
+        name_upper = (folder.name or "").upper()
+        if name_upper.endswith("_STORY"):
+            ftype = "STORY"
+        elif name_upper.endswith("_POST"):
+            ftype = "POST"
+        else:
+            ftype = "OTHER" # Hoặc mặc định là POST tùy bạn
+
+        result.append({
+            "id": folder.id,
+            "name": folder.name,
+            "type": ftype,
+        })
+    return result
+
+
+def get_all_configs(session: Session):
+    statement = select(PageConfig)
+    configs = session.exec(statement).all()
+
+    results = []
+    for config in configs:
+        folder_ids: List[str] = []
+        if config.folder_ids:
+            try:
+                folder_ids = (
+                    json.loads(config.folder_ids)
+                    if isinstance(config.folder_ids, str)
+                    else config.folder_ids
+                )
+            except Exception:
+                folder_ids = []
+
+        results.append(
+            {
+                "page_id": config.page_id,
+                "config": {
+                    "page_id": config.page_id,
+                    "enabled": config.enabled,
+                    "folder_ids": folder_ids,
+                    "schedule": config.schedule or [],
+                    "posts_per_slot": config.posts_per_slot,
+                },
+            }
+        )
+    return results
+
+
+def save_page_config(session: Session, data: dict):
+    page_id = data.get("page_id")
+    if not page_id:
+        return {"error": "Thiếu page_id"}
+
+    config = session.get(PageConfig, page_id)
+    if not config:
+        config = PageConfig(page_id=page_id)
+        if not session.get(Page, page_id):
+            session.add(Page(page_id=page_id, page_name="Unknown Page"))
+
+    config.folder_ids = json.dumps(data.get("folder_ids", []))
+    config.schedule = data.get("schedule", [])
+    config.enabled = data.get("enabled", True)
+    config.posts_per_slot = data.get("posts_per_slot", 1)
+
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+
+    return {"success": True, "page_id": page_id}
+
+
+def test_content_generation(session: Session, folder_id: str):
+    image = session.exec(
+        select(Image)
+        .where(Image.folder_id == folder_id)
+        .order_by(func.random())
+        .limit(1)
+    ).first()
+
+    if not image:
+        return {"error": "Folder này không có ảnh nào!"}
+
+    caption_entry = session.get(FolderCaption, folder_id)
+    selected_caption = ""
+    if (
+        caption_entry
+        and isinstance(caption_entry.captions, list)
+        and len(caption_entry.captions) > 0
+    ):
+        selected_caption = random.choice(caption_entry.captions)
+
+    return {
+        "image_url": f"http://localhost:3210/api/image/{image.id}",
+        "caption": selected_caption,
+        "type": "POST",
     }
