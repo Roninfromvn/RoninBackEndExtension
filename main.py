@@ -7,6 +7,14 @@ from app.drive_service import download_image_from_drive
 
 app = FastAPI(title="Posting Content Server")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Cho phép tất cả nguồn (Extension, Browser...)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
 def read_root():
     return {"status": "Server is running 🚀"}

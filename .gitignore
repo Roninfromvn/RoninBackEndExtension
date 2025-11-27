@@ -19,3 +19,5 @@ service_account.json
 # Mac/Windows system files
 .DS_Store
 Thumbs.db
+
+service_account.json
