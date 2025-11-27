@@ -1,26 +1,35 @@
 # Dependencies
-/node_modules
+node_modules/
 
-# Environment
+# Build artifacts
+dist/
+build/
+coverage/
+.turbo/
+
+# Environment & secrets
 .env
-.env.test
+.env.*
+!.env.example
+service-account-key.json
+
+# Logs & runtime data
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# OS metadata
 .DS_Store
+Thumbs.db
 
-# Temporary files
-/tmp
-
-# Editor/OS specific
+# IDE/editor
+.idea/
 .vscode/
+*.swp
 
-# Build artifacts (if using Babel/TypeScript later)
-/dist
-/build
-
-# Database credentials/files
-*.sqlite
-/data
+# Misc
+.npm/
 
