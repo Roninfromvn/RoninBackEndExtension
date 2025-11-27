@@ -11,6 +11,8 @@ from app.database import get_session, engine
 from app.content_service import generate_regular_post, generate_story_post
 from app.drive_service import download_image_from_drive
 from app.models import Page, PageConfig, Folder, Image, FolderCaption, PageHealth, PostMeta, PostMetric
+from app.api_analytics import router as analytics_router
+
 
 app = FastAPI(title="Posting Content Server")
 
@@ -30,7 +32,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 2. INPUT SCHEMA ---
+# --- 2. ĐĂNG KÝ ROUTER ANALYTICS ---
+# prefix="/api" nghĩa là tất cả API trong file kia sẽ tự động có đầu ngữ /api
+# tags=["Analytics"] để gom nhóm đẹp mắt trong Swagger UI
+app.include_router(analytics_router, prefix="/api", tags=["Analytics"])
+
+# --- 3. INPUT SCHEMA ---
 class ConfigInput(BaseModel):
     page_id: str
     enabled: bool = True 
@@ -43,7 +50,7 @@ class ConfigInput(BaseModel):
 def read_root():
     return {"status": "Server is running 🚀"}
 
-# --- 3. API PROXY ẢNH ---
+# --- 4. API PROXY ẢNH ---
 @app.get("/api/image/{file_id}")
 def get_image_proxy(file_id: str):
     image_stream = download_image_from_drive(file_id)
@@ -66,7 +73,7 @@ def get_image_proxy(file_id: str):
 
     return Response(content=image_stream.read(), media_type=mime_type)
 
-# --- 4. API LẤY NỘI DUNG ---
+# --- 5. API LẤY NỘI DUNG ---
 @app.get("/api/post/{page_id}")
 def get_post_content(page_id: str, session: Session = Depends(get_session)):
     result = generate_regular_post(session, page_id)
@@ -81,7 +88,7 @@ def get_story_content(page_id: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail=result["error"])
     return result
 
-# --- 5. API GET CONFIG (ĐÃ SỬA LOGIC PARSE JSON MẠNH MẼ HƠN) ---
+# --- 6. API GET CONFIG (ĐÃ SỬA LOGIC PARSE JSON MẠNH MẼ HƠN) ---
 @app.get("/api/config/all")
 def api_get_configs(session: Session = Depends(get_session)):
     configs = session.exec(select(PageConfig)).all()
@@ -156,7 +163,7 @@ def api_save_config(data: ConfigInput, session: Session = Depends(get_session)):
     session.commit()
     return {"message": "Lưu cấu hình thành công!", "page_id": data.page_id}
 
-# --- 6. API LẤY DANH SÁCH FOLDER (ĐÃ FIX TYPE VÀ STRING ID) ---
+# --- 7. API LẤY DANH SÁCH FOLDER (ĐÃ FIX TYPE VÀ STRING ID) ---
 @app.get("/api/folders/all")
 def api_get_folders(session: Session = Depends(get_session)):
     folders = session.exec(select(Folder)).all()
@@ -185,7 +192,7 @@ def api_get_folders(session: Session = Depends(get_session)):
         
     return result
 
-# --- 7. API TEST CONTENT ---
+# --- 8. API TEST CONTENT ---
 @app.get("/api/test/content/{folder_id}")
 def get_test_content_api(folder_id: str, session: Session = Depends(get_session)):
     image = session.exec(select(Image).where(Image.folder_id == folder_id).order_by(func.random()).limit(1)).first()
