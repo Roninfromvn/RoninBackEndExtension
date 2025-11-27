@@ -188,6 +188,9 @@ def get_all_configs(session: Session):
                     "folder_ids": folder_ids,
                     "schedule": config.schedule or [],
                     "posts_per_slot": config.posts_per_slot,
+                    "page_scale": getattr(config, "page_scale", "SMALL"),
+                    "has_recommendation": getattr(config, "has_recommendation", True),
+                    "note": getattr(config, "note", None),
                 },
             }
         )
@@ -209,6 +212,11 @@ def save_page_config(session: Session, data: dict):
     config.schedule = data.get("schedule", [])
     config.enabled = data.get("enabled", True)
     config.posts_per_slot = data.get("posts_per_slot", 1)
+    config.page_scale = data.get("page_scale", getattr(config, "page_scale", "SMALL"))
+    config.has_recommendation = data.get(
+        "has_recommendation", getattr(config, "has_recommendation", True)
+    )
+    config.note = data.get("note", getattr(config, "note", None))
 
     session.add(config)
     session.commit()

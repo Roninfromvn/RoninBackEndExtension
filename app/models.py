@@ -18,17 +18,34 @@ class Page(SQLModel, table=True):
 # 2. Bảng PageConfig (Đã thêm schedule, enabled, posts_per_slot)
 class PageConfig(SQLModel, table=True):
     __tablename__ = "page_configs"
-    page_id: str = Field(primary_key=True, foreign_key="pages.page_id")
-
-    folder_ids: Optional[str] = None
     
+    # Khóa chính & Liên kết
+    page_id: str = Field(primary_key=True, foreign_key="pages.page_id")
+    page: Optional[Page] = Relationship(back_populates="config")
+    
+    # 1. Nguồn nội dung (Giữ nguyên)
+    # Lưu danh sách folder_id dạng chuỗi JSON hoặc string phân cách
+    folder_ids: Optional[str] = None 
+
+    # 2. Các tham số điều khiển đăng bài
     enabled: bool = Field(default=True)
     posts_per_slot: int = Field(default=1)
-    # Sử dụng Column(JSON) để lưu list/dict
     schedule: List[str] = Field(default_factory=list, sa_column=Column(JSON))
 
-    page: Optional[Page] = Relationship(back_populates="config")
+    # 2. Quy mô Page (Chiến lược: Phân loại để có tần suất đăng bài khác nhau)
+    # Giá trị gợi ý: "SMALL" (Mới/Clone), "MEDIUM" (Traffic ổn), "LARGE" (Kiếm tiền/VIP)
+    page_scale: str = Field(default="SMALL")
 
+    # 3. Trạng thái Đề xuất (Chiến lược: Cầu dao an toàn)
+    # True = Xanh/Ổn, False = Đỏ/Mất đề xuất (Sẽ dừng đăng bài bán hàng)
+    has_recommendation: bool = Field(default=True)
+
+    # 4. Ghi chú (Chiến lược: Quản lý thủ công)
+    # Dùng Column(Text) để cho phép viết dài
+    note: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+
+    
 # 3. Bảng Folder
 class Folder(SQLModel, table=True):
     __tablename__ = "folders"

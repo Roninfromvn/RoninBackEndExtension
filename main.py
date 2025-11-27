@@ -1,3 +1,4 @@
+import json
 from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware 
 from sqlmodel import Session
@@ -7,24 +8,25 @@ from app.content_service import (
     generate_story_post,
     get_all_folders,
     get_all_configs,
-    save_page_config,
     test_content_generation,
 )
 from app.drive_service import download_image_from_drive 
+from app.models import Page, PageConfig
 from pydantic import BaseModel
-from typing import Any, List
+from typing import List, Optional
 
 app = FastAPI(title="Posting Content Server")
 
 
-class ConfigPayload(BaseModel):
+class ConfigInput(BaseModel):
     page_id: str
     enabled: bool = True
-    folder_ids: List[str] = []
+    folder_ids: List[str]
     schedule: List[str] = []
     posts_per_slot: int = 1
-    caption_by_folder: Any = {}
-    default_caption: str = ""
+    page_scale: str = "SMALL"
+    has_recommendation: bool = True
+    note: Optional[str] = None
 
 # --- CẤU HÌNH CORS ---
 app.add_middleware(
@@ -91,8 +93,38 @@ def api_get_configs(session: Session = Depends(get_session)):
 
 
 @app.post("/api/config")
-def api_save_config(payload: ConfigPayload, session: Session = Depends(get_session)):
-    return save_page_config(session, payload.dict())
+def api_save_config(data: ConfigInput, session: Session = Depends(get_session)):
+    existing_config = session.get(PageConfig, data.page_id)
+
+    if not session.get(Page, data.page_id):
+        session.add(Page(page_id=data.page_id, page_name="Unknown Page"))
+
+    folder_ids_str = json.dumps(data.folder_ids)
+
+    if existing_config:
+        existing_config.folder_ids = folder_ids_str
+        existing_config.enabled = data.enabled
+        existing_config.schedule = data.schedule
+        existing_config.posts_per_slot = data.posts_per_slot
+        existing_config.page_scale = data.page_scale
+        existing_config.has_recommendation = data.has_recommendation
+        existing_config.note = data.note
+        session.add(existing_config)
+    else:
+        new_config = PageConfig(
+            page_id=data.page_id,
+            folder_ids=folder_ids_str,
+            enabled=data.enabled,
+            schedule=data.schedule,
+            posts_per_slot=data.posts_per_slot,
+            page_scale=data.page_scale,
+            has_recommendation=data.has_recommendation,
+            note=data.note,
+        )
+        session.add(new_config)
+
+    session.commit()
+    return {"message": "Lưu cấu hình thành công!", "page_id": data.page_id}
 
 
 @app.get("/api/folders/all")
