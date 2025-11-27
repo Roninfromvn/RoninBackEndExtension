@@ -7,7 +7,6 @@ from datetime import datetime
 class Page(SQLModel, table=True):
     __tablename__ = "pages"
     page_id: str = Field(primary_key=True)
-    name: Optional[str] = None
     page_name: Optional[str] = None
     status: Optional[str] = None
     avatar_url: Optional[str] = None

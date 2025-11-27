@@ -52,15 +52,12 @@ def get_all_page_configs(session: Session):
 
     output = []
     for page, config in results:
-        # Lấy PageConfig nếu tồn tại, nếu không thì trả về default/None
-        config_data = config.model_dump() if config else None
-        
         output.append({
             "page_id": page.page_id,
             "page_name": page.page_name,
             "avatar_url": page.avatar_url,
             "is_configured": config is not None,
-            "config": config_data
+            "config": config.model_dump() if config else None
         })
     return output
 
