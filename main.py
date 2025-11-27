@@ -1,15 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware 
 from sqlmodel import Session
 from app.database import get_session
 from app.content_service import generate_regular_post, generate_story_post
-# Import thêm cái này
 from app.drive_service import download_image_from_drive 
 
 app = FastAPI(title="Posting Content Server")
 
+# --- CẤU HÌNH CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cho phép tất cả nguồn (Extension, Browser...)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -19,21 +20,37 @@ app.add_middleware(
 def read_root():
     return {"status": "Server is running 🚀"}
 
-# --- API MỚI: PROXY ẢNH ---
+# --- [QUAN TRỌNG] API PROXY ẢNH ĐÃ SỬA ---
 @app.get("/api/image/{file_id}")
 def get_image_proxy(file_id: str):
-    # 1. Tải ảnh từ Drive (qua RAM server)
     image_stream = download_image_from_drive(file_id)
     
     if not image_stream:
-        # Nếu lỗi thì trả về ảnh rỗng hoặc 404
         raise HTTPException(status_code=404, detail="Không tìm thấy ảnh trên Drive")
     
-    # 2. Trả về dạng luồng dữ liệu (Stream)
-    # Mặc định là image/jpeg, nếu kỹ tính có thể lưu mime_type trong DB để trả đúng
-    return Response(content=image_stream.read(), media_type="image/jpeg")
+    # --- BẮT ĐẦU ĐOẠN LOGIC MỚI ---
+    # Đọc 4 bytes đầu để đoán định dạng thật của ảnh
+    header = image_stream.read(4)
+    image_stream.seek(0) # Tua lại về đầu file để đọc lại từ đầu
+    
+    mime_type = "image/jpeg" # Mặc định là JPG
+    
+    # Kiểm tra các chữ ký file (Magic Numbers)
+    if header.startswith(b'\x89PNG'):
+        mime_type = "image/png"
+    elif header.startswith(b'GIF8'):
+        mime_type = "image/gif"
+    elif header.startswith(b'RIFF') and b'WEBP' in image_stream.read(12):
+        image_stream.seek(0)
+        mime_type = "image/webp"
+    else:
+        image_stream.seek(0) # Reset nếu không khớp logic trên
+    # ------------------------------
 
-# --- CÁC API CŨ ---
+    # Trả về với mime_type ĐÚNG thay vì ép cứng
+    return Response(content=image_stream.read(), media_type=mime_type)
+
+# --- CÁC API KHÁC GIỮ NGUYÊN ---
 @app.get("/api/post/{page_id}")
 def get_post_content(page_id: str, session: Session = Depends(get_session)):
     result = generate_regular_post(session, page_id)
