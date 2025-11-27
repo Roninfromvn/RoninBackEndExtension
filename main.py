@@ -2,17 +2,24 @@ import json
 import random
 from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select, func
+from sqlmodel import Session, select, func, SQLModel
 from pydantic import BaseModel
 from typing import List, Optional
 
 # Import các module local
-from app.database import get_session
+from app.database import get_session, engine
 from app.content_service import generate_regular_post, generate_story_post
 from app.drive_service import download_image_from_drive
-from app.models import Page, PageConfig, Folder, Image, FolderCaption
+from app.models import Page, PageConfig, Folder, Image, FolderCaption, PageHealth, PostMeta, PostMetric
 
 app = FastAPI(title="Posting Content Server")
+
+@app.on_event("startup")
+def on_startup():
+    print("🔄 Đang kiểm tra và cập nhật Schema Database...")
+    # Lệnh này sẽ tự động tạo bảng analytics_... nếu chưa có trong PostgreSQL
+    SQLModel.metadata.create_all(engine)
+    print("✅ Database Schema đã đồng bộ!")
 
 # --- 1. CẤU HÌNH CORS ---
 app.add_middleware(

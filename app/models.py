@@ -91,3 +91,71 @@ class SwipeLinkUsage(SQLModel, table=True):
     swipe_link_id: str = Field(foreign_key="swipe_links.id")
     
     link: SwipeLink = Relationship(back_populates="usages")
+
+# ANALYTICS & INSIGHTS (Time-Series)
+
+# 8. Sức khỏe Page theo ngày (Lưu lịch sử biến động)
+class PageHealth(SQLModel, table=True):
+    __tablename__ = "analytics_page_health"
+    
+    # Khóa chính phức hợp (Composite Key) giả lập
+    # Lưu ý: SQLModel chưa hỗ trợ composite PK trực tiếp tốt, nên ta dùng ID tự tăng
+    # và đặt UniqueConstraint ở mức DB (sẽ xử lý sau nếu cần).
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    page_id: str = Field(foreign_key="pages.page_id", index=True)
+    record_date: datetime = Field(index=True)  # Ngày ghi nhận (YYYY-MM-DD)
+    
+    # Chỉ số Tăng trưởng (Growth)
+    followers_total: int = Field(default=0)
+    followers_new: int = Field(default=0)
+    unfollows: int = Field(default=0)
+    net_follows: int = Field(default=0)
+    
+    # Chỉ số Hiệu suất (Performance)
+    total_reach: int = Field(default=0)       # Reach toàn trang trong ngày
+    total_interaction: int = Field(default=0) # Tổng tương tác
+    link_clicks: int = Field(default=0)       # Tổng click link
+    
+    # Quan hệ
+    page: Optional[Page] = Relationship()
+
+# 9. Metadata Bài viết (Lưu thông tin tĩnh, chỉ tạo 1 lần)
+class PostMeta(SQLModel, table=True):
+    __tablename__ = "analytics_post_meta"
+    
+    post_id: str = Field(primary_key=True)
+    page_id: str = Field(foreign_key="pages.page_id", index=True)
+    
+    created_time: datetime = Field(index=True) # Thời gian đăng bài gốc
+    
+    post_type: Optional[str] = None        # PHOTO, VIDEO, ALBUM, STATUS...
+    permalink: Optional[str] = None        # Link gốc bài viết
+    caption_snippet: Optional[str] = None  # 50 ký tự đầu để nhận diện nội dung
+    
+    # Quan hệ
+    metrics: List["PostMetric"] = Relationship(back_populates="post_meta")
+
+# 10. Chỉ số Bài viết (Lưu Snapshot biến động)
+class PostMetric(SQLModel, table=True):
+    __tablename__ = "analytics_post_metric"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    post_id: str = Field(foreign_key="analytics_post_meta.post_id", index=True)
+    
+    updated_at: datetime = Field(default_factory=datetime.utcnow) # Thời điểm quét
+    
+    # Các chỉ số Engagement (Analyst cần cái này để tính tỷ lệ)
+    reach: int = Field(default=0)
+    impressions: int = Field(default=0)
+    
+    reactions: int = Field(default=0)
+    comments: int = Field(default=0)
+    shares: int = Field(default=0)
+    clicks: int = Field(default=0)     # Tổng click (ảnh + link)
+    other_clicks: int = Field(default=0) # Click tiêu đề/xem thêm...
+    
+    # Cờ đánh dấu để tối ưu hiệu năng quét
+    is_final: bool = Field(default=False) # Nếu bài > 7 ngày -> True -> Extension sẽ bỏ qua không quét nữa
+    
+    post_meta: Optional[PostMeta] = Relationship(back_populates="metrics")
