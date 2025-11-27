@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, func
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import DB & Models
 from app.database import get_session
@@ -10,6 +10,9 @@ from app.models import PageHealth, PostMeta, PostMetric
 
 # Khởi tạo Router (thay vì app = FastAPI)
 router = APIRouter()
+
+class CheckSyncInput(BaseModel):
+    page_id: str
 
 # --- 1. Input Schemas (Chuyển hết Pydantic class sang đây) ---
 class PageHealthInput(BaseModel):
@@ -43,6 +46,63 @@ class PostMetricInput(BaseModel):
     is_final: bool = False
 
 # --- 2. API Endpoints (Thay @app.post bằng @router.post) ---
+
+@router.post("/sync/check-gaps")
+def check_sync_gaps(data: CheckSyncInput, session: Session = Depends(get_session)):
+    # 1. Kiểm tra Điều kiện Folder (Post + Story)
+    # Lấy config của Page
+    config = session.get(PageConfig, data.page_id)
+    if not config or not config.folder_ids:
+        return {"eligible": False, "reason": "No config"}
+    
+    # Parse folder_ids
+    import json
+    try:
+        f_ids = json.loads(config.folder_ids) if isinstance(config.folder_ids, str) else config.folder_ids
+    except:
+        f_ids = []
+        
+    if not f_ids:
+        return {"eligible": False, "reason": "No folders"}
+
+    # Query DB để xem tên các folder này
+    folders = session.exec(select(Folder).where(Folder.id.in_(f_ids))).all()
+    
+    has_post = any(f.name.upper().endswith("_POST") for f in folders)
+    has_story = any(f.name.upper().endswith("_STORY") for f in folders)
+    
+    if not (has_post and has_story):
+        return {"eligible": False, "reason": "Missing POST or STORY folder"}
+
+    # 2. Tìm các ngày thiếu dữ liệu trong 14 ngày qua (trừ hôm nay)
+    missing_dates = []
+    today = datetime.utcnow().date()
+    
+    # Lấy danh sách ngày đã có trong DB
+    existing_records = session.exec(
+        select(PageHealth.record_date)
+        .where(PageHealth.page_id == data.page_id)
+        .where(PageHealth.record_date >= today - timedelta(days=15))
+    ).all()
+    
+    # Convert sang set string để dễ so sánh
+    existing_set = {d.strftime("%Y-%m-%d") for d in existing_records if isinstance(d, datetime) or hasattr(d, 'strftime')}
+    # Fallback nếu DB trả về string
+    if existing_records and isinstance(existing_records[0], str):
+         existing_set = set(existing_records)
+
+    # Quét 14 ngày trước (từ hôm qua trở về)
+    for i in range(1, 15):
+        check_date = today - timedelta(days=i)
+        date_str = check_date.strftime("%Y-%m-%d")
+        
+        if date_str not in existing_set:
+            missing_dates.append(date_str)
+            
+    return {
+        "eligible": True,
+        "missing_dates": missing_dates # Danh sách ngày cần chạy bù
+    }
 
 @router.post("/sync/page-health")
 def sync_page_health(data: PageHealthInput, session: Session = Depends(get_session)):
