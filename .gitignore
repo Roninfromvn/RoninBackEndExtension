@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Environment Variables & Secrets (QUAN TRỌNG)
+.env
+service_account.json
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Mac/Windows system files
+.DS_Store
+Thumbs.db
