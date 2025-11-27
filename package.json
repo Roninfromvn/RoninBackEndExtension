@@ -1,26 +1,52 @@
 {
-  "name": "roninbackendextension",
+  "name": "drive-proxy",
   "version": "1.0.0",
-  "description": "",
+  "description": "Google Drive to Facebook posting proxy server",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "worker": "node worker.js",
+    "worker:process": "node worker.js process",
+    "worker:full-scan": "node worker.js --full-scan",
+    "worker:reset": "node worker.js --reset",
+    "worker:watch": "nodemon worker.js",
+    "check-status": "node check-status.js",
+    "test-manifest": "node test-manifest.js",
+    "health": "curl http://localhost:3210/health",
+    "health:detailed": "curl http://localhost:3210/health/detailed",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:token-vault": "node ../test-token-vault.js"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Roninfromvn/RoninBackEndExtension.git"
-  },
-  "keywords": [],
+  "keywords": [
+    "google-drive",
+    "facebook",
+    "proxy",
+    "manifest",
+    "worker"
+  ],
   "author": "",
   "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/Roninfromvn/RoninBackEndExtension/issues"
-  },
-  "homepage": "https://github.com/Roninfromvn/RoninBackEndExtension#readme",
   "dependencies": {
-    "dotenv": "^17.2.3",
-    "express": "^5.1.0",
-    "googleapis": "^166.0.0",
-    "pg": "^8.16.3"
+    "@google-cloud/firestore": "^7.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "firebase-admin": "^12.7.0",
+    "form-data": "^4.0.0",
+    "google-auth-library": "^9.0.0",
+    "googleapis": "^128.0.0",
+    "ioredis": "^5.7.0",
+    "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.16.3",
+    "pm2": "^6.0.8",
+    "redis": "^5.8.2",
+    "uuid": "^9.0.1",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.0.1"
   }
 }
