@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import Column, JSON, Text
 from datetime import datetime
@@ -8,12 +8,22 @@ class Page(SQLModel, table=True):
     __tablename__ = "pages"
     page_id: str = Field(primary_key=True)
     name: Optional[str] = None
+    page_name: Optional[str] = None
+    status: Optional[str] = None
+    avatar_url: Optional[str] = None
     config: Optional["PageConfig"] = Relationship(back_populates="page")
 
 class PageConfig(SQLModel, table=True):
     __tablename__ = "page_configs"
     page_id: str = Field(primary_key=True, foreign_key="pages.page_id")
-    folder_ids: Optional[str] = None
+    enabled: bool = Field(default=True)
+    folder_ids: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    schedule: List[str] = Field(default_factory=list, sa_column=Column(JSON))
+    posts_per_slot: int = Field(default=1)
+    caption_by_folder: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    default_caption: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     page: Optional[Page] = Relationship(back_populates="config")
 
 class Folder(SQLModel, table=True):

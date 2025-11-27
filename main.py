@@ -1,9 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi import FastAPI, Depends, HTTPException, Response, Body
 from fastapi.middleware.cors import CORSMiddleware 
 from sqlmodel import Session
 from app.database import get_session
-from app.content_service import generate_regular_post, generate_story_post
+from app.content_service import generate_regular_post, generate_story_post, generate_content_by_folder
+from app.config_service import (
+    get_page_config,
+    upsert_page_config,
+    get_all_folders,
+    get_all_page_configs,
+)
 from app.drive_service import download_image_from_drive 
+from typing import Dict, Any
 
 app = FastAPI(title="Posting Content Server")
 
@@ -64,6 +71,47 @@ def get_story_content(page_id: str, session: Session = Depends(get_session)):
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+# --- API MỚI: QUẢN LÝ CẤU HÌNH ---
+@app.get("/api/config/all")
+def get_all_configs_api(session: Session = Depends(get_session)):
+    return get_all_page_configs(session)
+
+
+@app.get("/api/config/{page_id}")
+def get_config_api(page_id: str, session: Session = Depends(get_session)):
+    config, error = get_page_config(session, page_id)
+    if error:
+        raise HTTPException(status_code=404, detail=error)
+    return config.model_dump()
+
+
+@app.post("/api/config")
+def update_config_api(
+    page_config_data: Dict[str, Any] = Body(...),
+    session: Session = Depends(get_session),
+):
+    try:
+        updated_config = upsert_page_config(session, page_config_data)
+        return {"success": True, "page_id": updated_config.page_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lỗi cập nhật cấu hình: {e}")
+
+
+@app.get("/api/folders/all")
+def get_all_folders_api(session: Session = Depends(get_session)):
+    return get_all_folders(session)
+
+
+# --- API MỚI: TEST CONTENT LINH ĐỘNG ---
+@app.get("/api/test/content/{folder_id}")
+def get_test_content_api(folder_id: str, session: Session = Depends(get_session)):
+    result = generate_content_by_folder(session, folder_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
 
 if __name__ == "__main__":
     import uvicorn
