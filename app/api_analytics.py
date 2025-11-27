@@ -83,8 +83,23 @@ def sync_page_health(data: PageHealthInput, session: Session = Depends(get_sessi
         )
         session.add(new_record)
     
+    # --- THÊM LOGIC CẬP NHẬT WATERMARK ---
+    # Sau khi lưu xong Health của ngày X, ta cập nhật mốc last_synced_date lên ngày X
+    try:
+        from app.models import PageConfig
+        current_date = datetime.fromisoformat(data.record_date)
+        
+        config = session.get(PageConfig, data.page_id)
+        if config:
+            # Chỉ cập nhật nếu ngày mới > ngày cũ (Tịnh tiến)
+            if not config.last_synced_date or current_date > config.last_synced_date:
+                config.last_synced_date = current_date
+                session.add(config)
+    except Exception as e:
+        print(f"Lỗi update watermark: {e}")
+
     session.commit()
-    return {"success": True, "msg": f"Đã sync Page Health ngày {r_date}"}
+    return {"success": True, "msg": f"Đã sync & update mốc ngày {data.record_date}"}
 
 @router.post("/sync/posts")
 def sync_posts_metadata(posts: List[PostMetaInput], session: Session = Depends(get_session)):
@@ -166,34 +181,49 @@ def check_sync_gaps(data: CheckSyncInput, session: Session = Depends(get_session
     if not (has_post and has_story):
         return {"eligible": False, "reason": "Missing POST or STORY folder"}
 
-    # B. Tìm các ngày thiếu dữ liệu trong 14 ngày qua (Trừ hôm nay)
-    missing_dates = []
+    # 2. LOGIC WATERMARK MỚI
     today = datetime.utcnow().date()
+    yesterday = today - timedelta(days=1)
     
-    # Lấy danh sách ngày đã có data trong DB
-    existing_records = session.exec(
-        select(PageHealth.record_date)
-        .where(PageHealth.page_id == data.page_id)
-        .where(PageHealth.record_date >= today - timedelta(days=15))
-    ).all()
-    
-    # Convert sang set string (YYYY-MM-DD) để so sánh
-    existing_set = set()
-    for d in existing_records:
-        if isinstance(d, datetime) or hasattr(d, 'strftime'):
-            existing_set.add(d.strftime("%Y-%m-%d"))
-        elif isinstance(d, str): # Phòng hờ DB trả về string
-            existing_set.add(d)
+    # Xác định mốc bắt đầu
+    start_date = None
+    if config.last_synced_date:
+        # Bắt đầu từ ngày tiếp theo của mốc
+        start_date = config.last_synced_date.date() + timedelta(days=1)
+    else:
+        # Nếu chưa có mốc, lấy 14 ngày trước
+        start_date = today - timedelta(days=14)
 
-    # Quét 14 ngày trước (từ hôm qua -1 trở về)
-    for i in range(1, 15):
-        check_date = today - timedelta(days=i)
-        date_str = check_date.strftime("%Y-%m-%d")
-        
-        if date_str not in existing_set:
-            missing_dates.append(date_str)
+    missing_dates = []
+    
+    # Nếu mốc đã là hôm qua -> Không cần làm gì
+    if start_date > yesterday:
+        return {"eligible": True, "missing_dates": []}
+
+    # Tạo danh sách các ngày cần bù (từ start_date đến yesterday)
+    delta = yesterday - start_date
+    for i in range(delta.days + 1):
+        day = start_date + timedelta(days=i)
+        missing_dates.append(day.strftime("%Y-%m-%d"))
             
     return {
         "eligible": True,
-        "missing_dates": missing_dates # Extension sẽ dựa vào list này để chạy
+        "missing_dates": missing_dates
+    }
+
+@router.get("/sync/active-posts")
+def get_active_posts(page_id: str, session: Session = Depends(get_session)):
+    # Lấy các bài đăng trong 7 ngày gần nhất
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    
+    posts = session.exec(
+        select(PostMeta.post_id, PostMeta.created_time)
+        .where(PostMeta.page_id == page_id)
+        .where(PostMeta.created_time >= seven_days_ago)
+    ).all()
+    
+    # Trả về danh sách object
+    return {
+        "count": len(posts),
+        "posts": [{"post_id": p[0], "created_time": p[1].isoformat()} for p in posts]
     }

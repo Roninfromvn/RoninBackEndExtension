@@ -1,7 +1,7 @@
 # app/models.py
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column, JSON, Text
+from sqlalchemy import Column, JSON, Text, Date
 from datetime import datetime
 
 # 1. Bảng Page (Đã cập nhật các field mới)
@@ -33,6 +33,9 @@ class PageConfig(SQLModel, table=True):
 
     # 4. Ghi chú
     note: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # 5. Mốc thời gian: Dữ liệu trước ngày này coi như đã đủ
+    last_synced_date: Optional[datetime] = Field(default=None)
 
     # Quan hệ
     page: Optional[Page] = Relationship(back_populates="config")
