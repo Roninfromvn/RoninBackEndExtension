@@ -23,12 +23,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 2. INPUT SCHEMA (Đã bỏ schedule, posts_per_slot) ---
+# --- 2. INPUT SCHEMA ---
 class ConfigInput(BaseModel):
     page_id: str
-    enabled: bool = True # Frontend vẫn gửi lên, nhưng backend sẽ tạm lờ đi nếu chưa có cột DB
+    enabled: bool = True 
     folder_ids: List[str]
-    # Các trường mới
     page_scale: str = "SMALL"
     has_recommendation: bool = True
     note: Optional[str] = None
@@ -37,15 +36,13 @@ class ConfigInput(BaseModel):
 def read_root():
     return {"status": "Server is running 🚀"}
 
-# --- 3. API PROXY ẢNH (Logic thông minh) ---
+# --- 3. API PROXY ẢNH ---
 @app.get("/api/image/{file_id}")
 def get_image_proxy(file_id: str):
     image_stream = download_image_from_drive(file_id)
-    
     if not image_stream:
         raise HTTPException(status_code=404, detail="Không tìm thấy ảnh trên Drive")
     
-    # Đọc magic bytes để đoán định dạng
     header = image_stream.read(4)
     image_stream.seek(0)
     
@@ -62,7 +59,7 @@ def get_image_proxy(file_id: str):
 
     return Response(content=image_stream.read(), media_type=mime_type)
 
-# --- 4. API LẤY NỘI DUNG (POST/STORY) ---
+# --- 4. API LẤY NỘI DUNG ---
 @app.get("/api/post/{page_id}")
 def get_post_content(page_id: str, session: Session = Depends(get_session)):
     result = generate_regular_post(session, page_id)
@@ -77,25 +74,43 @@ def get_story_content(page_id: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail=result["error"])
     return result
 
-# --- 5. QUẢN LÝ CONFIG (Đã sửa khớp DB mới) ---
+# --- 5. API GET CONFIG (ĐÃ SỬA LOGIC PARSE JSON MẠNH MẼ HƠN) ---
 @app.get("/api/config/all")
 def api_get_configs(session: Session = Depends(get_session)):
-    # Lấy tất cả config
     configs = session.exec(select(PageConfig)).all()
     result = []
+    
     for c in configs:
         f_ids = []
         try:
-            if c.folder_ids:
-                f_ids = json.loads(c.folder_ids)
-        except: pass
+            raw = c.folder_ids
+            if raw:
+                # Trường hợp 1: Nó đã là List (do SQLModel tự convert)
+                if isinstance(raw, list):
+                    f_ids = raw
+                # Trường hợp 2: Nó là String
+                elif isinstance(raw, str):
+                    # Fix lỗi sơ đẳng: Replace dấu nháy đơn thành nháy kép để đúng chuẩn JSON
+                    clean_json = raw.replace("'", '"')
+                    try:
+                        f_ids = json.loads(clean_json)
+                    except json.JSONDecodeError:
+                        # Nếu vẫn lỗi thì thử parse thủ công hoặc bỏ qua
+                        print(f"⚠️ Lỗi JSON data page {c.page_id}: {raw}")
+                        f_ids = []
+        except Exception as e:
+            print(f"❌ Lỗi xử lý config page {c.page_id}: {e}")
+            f_ids = []
         
+        # [QUAN TRỌNG] Ép kiểu về string hết để khớp với ID của Folder
+        f_ids = [str(x) for x in f_ids]
+
         result.append({
             "page_id": c.page_id,
             "config": {
                 "page_id": c.page_id,
-                "enabled": True, # Tạm để True vì DB chưa có cột enabled
-                "folder_ids": f_ids,
+                "enabled": True, 
+                "folder_ids": f_ids, # <--- Giờ chắc chắn là list string
                 "page_scale": c.page_scale,
                 "has_recommendation": c.has_recommendation,
                 "note": c.note
@@ -105,12 +120,12 @@ def api_get_configs(session: Session = Depends(get_session)):
 
 @app.post("/api/config")
 def api_save_config(data: ConfigInput, session: Session = Depends(get_session)):
-    # Tạo Page ảo nếu chưa có để tránh lỗi khóa ngoại
     if not session.get(Page, data.page_id):
         session.add(Page(page_id=data.page_id, page_name="Unknown Page"))
         session.commit()
 
     existing_config = session.get(PageConfig, data.page_id)
+    # Lưu dưới dạng chuẩn JSON (dấu nháy kép)
     folder_ids_str = json.dumps(data.folder_ids)
 
     if existing_config:
@@ -118,7 +133,7 @@ def api_save_config(data: ConfigInput, session: Session = Depends(get_session)):
         existing_config.page_scale = data.page_scale
         existing_config.has_recommendation = data.has_recommendation
         existing_config.note = data.note
-        # existing_config.enabled = data.enabled  <-- Bỏ comment nếu DB đã có cột enabled
+        # existing_config.enabled = data.enabled 
         session.add(existing_config)
     else:
         new_config = PageConfig(
@@ -127,56 +142,50 @@ def api_save_config(data: ConfigInput, session: Session = Depends(get_session)):
             page_scale=data.page_scale,
             has_recommendation=data.has_recommendation,
             note=data.note,
-            # enabled=data.enabled <-- Bỏ comment nếu DB đã có cột enabled
+            # enabled=data.enabled
         )
         session.add(new_config)
 
     session.commit()
     return {"message": "Lưu cấu hình thành công!", "page_id": data.page_id}
 
-# --- 6. API LẤY DANH SÁCH FOLDER (Mới thêm) ---
+# --- 6. API LẤY DANH SÁCH FOLDER (ĐÃ FIX TYPE VÀ STRING ID) ---
 @app.get("/api/folders/all")
 def api_get_folders(session: Session = Depends(get_session)):
     folders = session.exec(select(Folder)).all()
     result = []
     
     for f in folders:
-        # Logic phân loại và làm sạch tên
         f_type = "OTHER"
         clean_name = f.name
-        
-        # Kiểm tra đuôi để phân loại (Case insensitive)
-        upper_name = f.name.upper()
+        upper_name = (f.name or "").upper()
         
         if upper_name.endswith("_POST"):
             f_type = "POST"
-            clean_name = f.name[:-5] # Cắt bỏ 5 ký tự cuối (_POST)
+            clean_name = f.name[:-5]
         elif upper_name.endswith("_STORY"):
             f_type = "STORY"
-            clean_name = f.name[:-6] # Cắt bỏ 6 ký tự cuối (_STORY)
+            clean_name = f.name[:-6]
             
-        # Làm đẹp tên: Thay dấu gạch dưới còn lại bằng khoảng trắng
         clean_name = clean_name.replace("_", " ").strip()
 
         result.append({
-            "id": f.id,
-            "name": clean_name, # Tên hiển thị (đã sạch)
-            "original_name": f.name, # Tên gốc (để debug nếu cần)
-            "type": f_type # Loại folder để Frontend lọc
+            "id": str(f.id), # <--- QUAN TRỌNG: Ép kiểu string
+            "name": clean_name,
+            "original_name": f.name,
+            "type": f_type
         })
         
     return result
 
-# --- 7. API TEST CONTENT (Mới thêm) ---
+# --- 7. API TEST CONTENT ---
 @app.get("/api/test/content/{folder_id}")
 def get_test_content_api(folder_id: str, session: Session = Depends(get_session)):
-    # 1. Random ảnh
     image = session.exec(select(Image).where(Image.folder_id == folder_id).order_by(func.random()).limit(1)).first()
     
     if not image:
         return {"error": "Folder này chưa có ảnh nào được đồng bộ"}
         
-    # 2. Random caption
     caption_entry = session.get(FolderCaption, folder_id)
     selected_caption = ""
     if caption_entry and caption_entry.captions:
