@@ -184,10 +184,7 @@ def get_all_configs(session: Session):
                 "page_id": config.page_id,
                 "config": {
                     "page_id": config.page_id,
-                    "enabled": config.enabled,
                     "folder_ids": folder_ids,
-                    "schedule": config.schedule or [],
-                    "posts_per_slot": config.posts_per_slot,
                     "page_scale": getattr(config, "page_scale", "SMALL"),
                     "has_recommendation": getattr(config, "has_recommendation", True),
                     "note": getattr(config, "note", None),
