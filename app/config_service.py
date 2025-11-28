@@ -1,77 +1,137 @@
-from sqlmodel import Session, select
-from .models import PageConfig, Page, Folder
-from typing import List, Dict, Any
+# app/sync_service.py
+import time
+from typing import List, Set, Dict
+from sqlmodel import Session, select, delete
+from app.models import Folder, Image
+from app.drive_service import get_drive_service
 
-# --- 1. Lấy cấu hình của 1 Page ---
-def get_page_config(session: Session, page_id: str):
-    config = session.get(PageConfig, page_id)
-    if not config:
-        page = session.get(Page, page_id)
-        if not page:
-             return None, "Page ID không tồn tại trong hệ thống Pages"
-             
-        # Cấu hình mặc định
-        # SỬ DỤNG CÁC GIÁ TRỊ MẶC ĐỊNH TỪ MODEL VÀ SỬA ĐỔI CHO KHỚP
-        config = PageConfig(
-            page_id=page_id, 
-            enabled=True, 
-            folder_ids=[], # SQLModel tự chuyển [] thành JSON string
-            schedule=[], 
-            posts_per_slot=1,
-            caption_by_folder={},
-            default_caption=""
-        )
-        session.add(config)
-        session.commit()
-        session.refresh(config)
-        
-    return config, None
-
-# --- 2. Cập nhật/Tạo mới cấu hình Page ---
-def upsert_page_config(session: Session, page_config_data: Dict[str, Any]):
-    config = session.get(PageConfig, page_config_data.get('page_id'))
-
-    if config:
-        for key, value in page_config_data.items():
-            # Chỉ cập nhật các trường có trong model và không phải khóa chính
-            if hasattr(config, key) and key not in ['page_id', 'created_at']:
-                setattr(config, key, value)
-    else:
-        # Tên cột folder_ids, schedule, caption_by_folder là JSON nên FE phải gửi List/Dict
-        config = PageConfig(**page_config_data)
-
-    session.add(config)
-    session.commit()
-    session.refresh(config)
-    return config
-
-# --- 3. Lấy tất cả Page và Cấu hình (dùng cho danh sách quản lý) ---
-def get_all_page_configs(session: Session):
-    statement = select(Page, PageConfig).join(PageConfig, isouter=True)
-    results = session.exec(statement).all()
-
-    output = []
-    for page, config in results:
-        output.append({
-            "page_id": page.page_id,
-            "page_name": page.page_name,
-            "avatar_url": page.avatar_url,
-            "is_configured": config is not None,
-            "config": config.model_dump() if config else None
-        })
-    return output
-
-# --- 4. Lấy tất cả Folders (Dùng cho MultiSelect) ---
-def get_all_folders(session: Session):
-    statement = select(Folder)
-    folders = session.exec(statement).all()
+# --- PHẦN 1: HELPER LẤY DỮ LIỆU DRIVE (Tối ưu tốc độ) ---
+def fetch_all_files_from_drive(service, folder_id: str) -> Dict[str, dict]:
+    """
+    Lấy toàn bộ file trong folder Drive.
+    Trả về Dictionary: { "file_id": { "name": "...", "thumbnail": "..." } }
+    Dùng Pagination để lấy không giới hạn số lượng.
+    """
+    query = f"'{folder_id}' in parents and mimeType contains 'image/' and trashed = false"
+    # Chỉ lấy 3 trường cần thiết để nhẹ gánh băng thông
+    fields = "nextPageToken, files(id, name, thumbnailLink)"
     
-    return [
-        {
-            "id": f.id,
-            "name": f.name,
-            # Phân loại cho FE dễ hiển thị
-            "type": "STORY" if f.name.upper().endswith("_STORY") else "POST" if f.name.upper().endswith("_POST") else "OTHER"
-        } 
-        for f in folders if f.name
-    ]
+    drive_files = {}
+    page_token = None
+    
+    while True:
+        try:
+            response = service.files().list(
+                q=query,
+                fields=fields,
+                pageSize=1000, # Lấy tối đa mỗi lần gọi
+                pageToken=page_token
+            ).execute()
+            
+            for f in response.get('files', []):
+                drive_files[f['id']] = {
+                    "name": f.get('name'),
+                    "thumbnail": f.get('thumbnailLink')
+                }
+                
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+        except Exception as e:
+            print(f"⚠️ Lỗi fetch Drive (Folder {folder_id}): {e}")
+            break
+            
+    return drive_files
+
+# --- PHẦN 2: LOGIC SYNC CỐT LÕI (Set Comparison) ---
+def sync_images_in_folder(session: Session, folder_id: str):
+    """
+    Đồng bộ 1 Folder theo chiến thuật So sánh Tập hợp.
+    """
+    start_time = time.time()
+    service = get_drive_service()
+    
+    print(f"   📥 [1/3] Đang tải danh sách từ Drive...")
+    # 1. Lấy tập dữ liệu từ Drive (Set A)
+    drive_map = fetch_all_files_from_drive(service, folder_id)
+    drive_ids = set(drive_map.keys())
+    
+    print(f"   💾 [2/3] Đang lấy dữ liệu từ DB...")
+    # 2. Lấy tập dữ liệu từ DB (Set B)
+    # Chỉ select cột ID để tiết kiệm RAM
+    db_ids = set(session.exec(select(Image.id).where(Image.folder_id == folder_id)).all())
+    
+    # 3. Tính toán chênh lệch (Set Operations) - Cực nhanh
+    ids_to_insert = drive_ids - db_ids  # Có trên Drive, chưa có DB
+    ids_to_delete = db_ids - drive_ids  # Có trên DB, đã mất trên Drive
+    
+    # ids_to_update = drive_ids.intersection(db_ids) # (Optional) Dành cho việc update thumbnail link
+    
+    print(f"   ⚙️ [3/3] Xử lý: +{len(ids_to_insert)} mới | -{len(ids_to_delete)} xóa")
+
+    # 4. Thực thi Bulk Action
+    
+    # A. XÓA (Bulk Delete)
+    if ids_to_delete:
+        # Chia nhỏ ra xóa nếu danh sách quá lớn (tránh lỗi SQL limit)
+        chunk_size = 1000
+        delete_list = list(ids_to_delete)
+        for i in range(0, len(delete_list), chunk_size):
+            chunk = delete_list[i:i + chunk_size]
+            statement = delete(Image).where(Image.id.in_(chunk))
+            session.exec(statement)
+    
+    # B. THÊM MỚI (Bulk Insert)
+    if ids_to_insert:
+        new_objects = []
+        for fid in ids_to_insert:
+            info = drive_map[fid]
+            img = Image(
+                id=fid,
+                name=info['name'],
+                thumbnail_link=info['thumbnail'],
+                folder_id=folder_id
+                # mime_type và created_time tạm bỏ qua để tăng tốc, hoặc fetch kỹ hơn nếu cần
+            )
+            new_objects.append(img)
+        
+        # Lưu một cục xuống DB
+        session.bulk_save_objects(new_objects)
+
+    # C. UPDATE (Optional - Cập nhật thumbnail link cho ảnh cũ)
+    # Phần này nếu làm kỹ sẽ chậm, tạm thời bỏ qua như bạn yêu cầu.
+    # Nếu muốn update: session.exec(update(Image)...)
+
+    session.commit()
+    duration = time.time() - start_time
+    return {
+        "inserted": len(ids_to_insert),
+        "deleted": len(ids_to_delete),
+        "total_active": len(drive_ids),
+        "duration": round(duration, 2)
+    }
+
+# --- PHẦN 3: SYNC TOÀN BỘ (Chạy tuần tự) ---
+def sync_all_folders(session: Session):
+    """
+    Quét lần lượt các folder trong DB.
+    """
+    folders = session.exec(select(Folder)).all()
+    results = []
+    
+    print(f"🚀 Bắt đầu Sync All ({len(folders)} folders)...")
+    
+    for f in folders:
+        # Bỏ qua các folder chưa có tên chuẩn (VD: Root) nếu cần
+        print(f"\n📂 Sync Folder: {f.name} ({f.id})")
+        try:
+            res = sync_images_in_folder(session, f.id)
+            print(f"   ✅ Xong trong {res['duration']}s")
+            results.append({**res, "folder": f.name})
+        except Exception as e:
+            print(f"   ❌ Lỗi: {e}")
+        
+        # Nghỉ 1 chút để server và Google không bị quá tải
+        time.sleep(0.5)
+        
+    return results
