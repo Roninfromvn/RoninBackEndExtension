@@ -6,7 +6,7 @@ from sqlmodel import Session, select, delete
 from datetime import datetime
 from dotenv import load_dotenv
 
-from app.models import Folder, Image
+from app.models import Folder, Image, FolderCaption
 from app.drive_service import get_drive_service
 
 load_dotenv()
@@ -81,11 +81,18 @@ def sync_folder_structure(session: Session):
             count_update += 1
 
     # 4. Thực thi
-    # A. Xóa Folder rác (Xóa cả ảnh bên trong)
+    # A. Xóa Folder rác (Xóa cả ảnh và caption bên trong)
     if ids_to_delete:
         delete_ids = list(ids_to_delete)
-        session.exec(delete(Image).where(Image.folder_id.in_(delete_ids))) # Xóa ảnh trước
-        session.exec(delete(Folder).where(Folder.id.in_(delete_ids)))      # Xóa folder sau
+        
+        # 1. [MỚI] Xóa Caption trước (để tránh lỗi khóa ngoại nếu có)
+        session.exec(delete(FolderCaption).where(FolderCaption.folder_id.in_(delete_ids)))
+        
+        # 2. Xóa Ảnh
+        session.exec(delete(Image).where(Image.folder_id.in_(delete_ids)))
+        
+        # 3. Cuối cùng xóa Folder
+        session.exec(delete(Folder).where(Folder.id.in_(delete_ids)))
 
     # B. Thêm Folder mới
     if ids_to_insert:

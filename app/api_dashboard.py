@@ -3,9 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session, select, func
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime  # <--- Thêm import datetime
 
 from app.database import get_session, engine
-from app.models import Folder, Image
+# [QUAN TRỌNG] Thêm FolderCaption vào dòng import này
+from app.models import Folder, Image, FolderCaption
 from app.sync_service import sync_folder_structure, sync_images_in_folder, sync_all_folders
 
 router = APIRouter()
@@ -76,3 +78,40 @@ def trigger_sync_all(background_tasks: BackgroundTasks):
         with Session(engine) as s: sync_all_folders(s)
     background_tasks.add_task(_bg)
     return {"status": "started", "message": "Sync All đang chạy ngầm..."}
+
+# --- PHẦN MỚI: QUẢN LÝ CAPTION ---
+
+class CaptionInput(BaseModel):
+    captions: List[str]
+
+
+@router.get("/folder/{folder_id}/captions")
+def get_folder_captions(folder_id: str, session: Session = Depends(get_session)):
+    """Lấy danh sách caption hiện tại của folder"""
+    fc = session.get(FolderCaption, folder_id)
+    # Trả về mảng rỗng nếu chưa có
+    return {"captions": fc.captions if fc else []}
+
+
+@router.post("/folder/{folder_id}/captions")
+def save_folder_captions(folder_id: str, data: CaptionInput, session: Session = Depends(get_session)):
+    """Lưu (Ghi đè) danh sách caption"""
+    folder = session.get(Folder, folder_id)
+    if not folder:
+        raise HTTPException(404, "Folder not found")
+        
+    fc = session.get(FolderCaption, folder_id)
+    if not fc:
+        # Nếu chưa có thì tạo mới
+        fc = FolderCaption(folder_id=folder_id, folder_name=folder.name, captions=[])
+        session.add(fc)
+    
+    # Lọc bỏ dòng trống và update
+    clean_captions = [c.strip() for c in data.captions if c.strip()]
+    fc.captions = clean_captions
+    fc.updated_at = datetime.utcnow()
+    
+    session.add(fc)
+    session.commit()
+    
+    return {"status": "success", "count": len(clean_captions)}
