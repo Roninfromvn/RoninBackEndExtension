@@ -11,13 +11,10 @@ router = APIRouter()
 
 class PageConfigInput(BaseModel):
     page_id: str
-    enabled: bool = True 
     folder_ids: List[str]
     page_scale: str = "SMALL"
     has_recommendation: bool = True
     note: Optional[str] = None
-    schedule: List[str] = []
-    posts_per_slot: int = 1
 
 @router.get("/all")
 def api_get_configs(session: Session = Depends(get_session)):
