@@ -1,6 +1,7 @@
 # app/content_service.py
 import random
 import json
+import os
 from typing import List
 from sqlmodel import Session, select, func
 from .models import (
@@ -12,6 +13,9 @@ from .models import (
     Folder,
     Page,
 )
+
+# URL chính xác của server (Cloudflare Tunnel)
+BASE_URL = os.getenv("BASE_URL", "https://api.roninfromvn.pp.ua")
 
 # --- Hàm _get_random_image_for_page ---
 def _get_random_image_for_page(session: Session, page_id: str, content_type: str):
@@ -63,7 +67,8 @@ def generate_regular_post(session: Session, page_id: str):
         "type": "POST",
         "page_id": page_id,
         "image_id": image.id,
-        "image_url": f"http://localhost:3210/api/image/{image.id}",
+        # [SỬA Ở ĐÂY] Dùng BASE_URL thay vì localhost
+        "image_url": f"{BASE_URL}/api/image/{image.id}",
         "caption": selected_caption
     }
 
@@ -86,7 +91,8 @@ def generate_story_post(session: Session, page_id: str):
         "type": "STORY",
         "page_id": page_id,
         "image_id": image.id,
-        "image_url": f"http://localhost:3210/api/image/{image.id}",
+        # [SỬA Ở ĐÂY] Dùng BASE_URL thay vì localhost
+        "image_url": f"{BASE_URL}/api/image/{image.id}",
         "swipe_link": final_link
     }
 
@@ -119,7 +125,8 @@ def generate_content_by_folder(session: Session, folder_id: str):
         "type": content_type,
         "page_id": "PREVIEW_MODE",
         "image_id": image.id,
-        "image_url": f"http://localhost:3210/api/image/{image.id}",
+        # [SỬA Ở ĐÂY]
+        "image_url": f"{BASE_URL}/api/image/{image.id}",  # Sửa thành BASE_URL
         "caption": selected_caption,
         "swipe_link": final_link
     }
@@ -235,7 +242,8 @@ def test_content_generation(session: Session, folder_id: str):
         selected_caption = random.choice(caption_entry.captions)
 
     return {
-        "image_url": f"http://localhost:3210/api/image/{image.id}",
+        "image_url": f"{BASE_URL}/api/image/{image.id}",
         "caption": selected_caption,
         "type": "POST",
     }
+    

@@ -10,25 +10,31 @@ router = APIRouter()
 @router.get("/image/{file_id}")
 def get_image_proxy(file_id: str):
     image_stream = download_image_from_drive(file_id)
-    if not image_stream: raise HTTPException(404, "Image not found on Drive")
+    if not image_stream:
+        # Trả về 404 nếu không tìm thấy ảnh
+        raise HTTPException(status_code=404, detail="Image not found on Drive")
+    
     header = image_stream.read(4)
     image_stream.seek(0)
-    mime = "image/jpeg"
-    if header.startswith(b'\x89PNG'): mime = "image/png"
-    elif header.startswith(b'GIF8'): mime = "image/gif"
+    
+    mime_type = "image/jpeg"
+    if header.startswith(b'\x89PNG'): mime_type = "image/png"
+    elif header.startswith(b'GIF8'): mime_type = "image/gif"
     elif header.startswith(b'RIFF') and b'WEBP' in image_stream.read(12): 
-        image_stream.seek(0); mime = "image/webp"
+        image_stream.seek(0)
+        mime_type = "image/webp"
     else: image_stream.seek(0)
-    return Response(content=image_stream.read(), media_type=mime)
+    return Response(content=image_stream.read(), media_type=mime_type)
 
 @router.get("/post/{page_id}")
 def get_post(page_id: str, session: Session = Depends(get_session)):
     res = generate_regular_post(session, page_id)
-    if "error" in res: raise HTTPException(404, res["error"])
+    # [QUAN TRỌNG] Không raise HTTPException nữa
+    # Trả về nguyên dict lỗi để Frontend hiển thị lý do cụ thể (VD: "List folder rỗng")
     return res
 
 @router.get("/story/{page_id}")
 def get_story(page_id: str, session: Session = Depends(get_session)):
     res = generate_story_post(session, page_id)
-    if "error" in res: raise HTTPException(404, res["error"])
+    # [QUAN TRỌNG] Tương tự như trên
     return res
