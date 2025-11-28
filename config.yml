@@ -1,0 +1,7 @@
+tunnel: ronintunnel
+credentials-file: C:\Users\tonng\.cloudflared\717ea0f3-c10d-4d80-935d-b9c5f97c0e80.json
+
+ingress:
+  - hostname: api.roninfromvn.pp.ua
+    service: http://localhost:3210      
+  - service: http_status:404

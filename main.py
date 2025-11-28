@@ -1,10 +1,13 @@
 import json
 import random
-from fastapi import FastAPI, Depends, HTTPException, Response
+import os
+from fastapi import FastAPI, Depends, HTTPException, Response, Security
+from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func, SQLModel
 from pydantic import BaseModel
 from typing import List, Optional
+from dotenv import load_dotenv
 
 # Import các module local
 from app.database import get_session, engine
@@ -14,14 +17,27 @@ from app.models import Page, PageConfig, Folder, Image, FolderCaption, PageHealt
 from app.api_analytics import router as analytics_router
 
 
-app = FastAPI(title="Posting Content Server")
+load_dotenv()
+API_KEY = os.getenv("RONIN_API_KEY")
+api_key_header = APIKeyHeader(name="X-Ronin-Key", auto_error=False)
+
+
+async def verify_api_key(api_key_header: str = Security(api_key_header)):
+    """Allow requests only when api key matches .env; skip check if unset."""
+    if not API_KEY:
+        return
+    if api_key_header == API_KEY:
+        return api_key_header
+    raise HTTPException(status_code=403, detail="❌ Sai mật khẩu (API Key không khớp)")
+
+
+app = FastAPI(title="Posting Content Server", dependencies=[Depends(verify_api_key)])
 
 @app.on_event("startup")
 def on_startup():
     print("🔄 Đang kiểm tra và cập nhật Schema Database...")
-    # Lệnh này sẽ tự động tạo bảng analytics_... nếu chưa có trong PostgreSQL
     SQLModel.metadata.create_all(engine)
-    print("✅ Database Schema đã đồng bộ!")
+    print(f"✅ Server đã sẵn sàng! (Chế độ bảo mật: {'BẬT' if API_KEY else 'TẮT'})")
 
 # --- 1. CẤU HÌNH CORS ---
 app.add_middleware(
@@ -214,4 +230,4 @@ def get_test_content_api(folder_id: str, session: Session = Depends(get_session)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=3210, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=3210, reload=False)
