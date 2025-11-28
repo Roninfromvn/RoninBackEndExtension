@@ -73,26 +73,26 @@ def generate_regular_post(session: Session, page_id: str):
     }
 
 def generate_story_post(session: Session, page_id: str):
+    # 1. Lấy ảnh (Giữ nguyên)
     image, error = _get_random_image_for_page(session, page_id, "STORY")
     if error: return {"error": error}
 
+    # 2. Lấy Link (LOGIC MỚI: Bốc đại từ kho, không cần check Page)
     statement = (
         select(SwipeLink)
-        .join(SwipeLinkUsage)
-        .where(SwipeLinkUsage.page_id == page_id)
-        .where(SwipeLink.is_active == True)
-        .order_by(func.random())
+        .where(SwipeLink.is_active == True)  # Chỉ lấy link đang bật
+        .order_by(func.random())             # Random toàn bộ kho
         .limit(1)
     )
     link_obj = session.exec(statement).first()
+    
     final_link = link_obj.link if link_obj else None
 
     return {
         "type": "STORY",
         "page_id": page_id,
         "image_id": image.id,
-        # [SỬA Ở ĐÂY] Dùng BASE_URL thay vì localhost
-        "image_url": f"{BASE_URL}/api/image/{image.id}",
+        "image_url": f"{BASE_URL}/api/image/{image.id}",  # Đã dùng BASE_URL chuẩn
         "swipe_link": final_link
     }
 

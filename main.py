@@ -10,6 +10,7 @@ from app.api_analytics import router as analytics_router
 from app.api_extension import router as extension_router
 from app.api_dashboard import router as dashboard_router
 from app.api_config import router as config_router
+from app.api_links import router as links_router
 
 app = FastAPI(title="Ronin CMS V2")
 
@@ -36,6 +37,7 @@ app.include_router(analytics_router, prefix="/api", tags=["Analytics"])
 app.include_router(extension_router, prefix="/api", tags=["Extension"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(config_router, prefix="/api/config", tags=["Config"])
+app.include_router(links_router, prefix="/api/links", tags=["Links"])
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=3210, reload=True)
