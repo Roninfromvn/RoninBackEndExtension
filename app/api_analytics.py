@@ -220,6 +220,7 @@ def get_active_posts(page_id: str, session: Session = Depends(get_session)):
         select(PostMeta.post_id, PostMeta.created_time)
         .where(PostMeta.page_id == page_id)
         .where(PostMeta.created_time >= seven_days_ago)
+        .where(PostMeta.post_type != "STORY") # <--- DÒNG NÀY QUAN TRỌNG NHẤT
     ).all()
     
     # Trả về danh sách object
