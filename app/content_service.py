@@ -1,8 +1,8 @@
+# app/content_service.py
 import random
 import json
 from typing import List
 from sqlmodel import Session, select, func
-# [ĐÃ SỬA] Import thêm Folder để có thể truy vấn tên folder
 from .models import (
     PageConfig,
     Image,
@@ -13,8 +13,7 @@ from .models import (
     Page,
 )
 
-# --- Hàm _get_random_image_for_page (Đã sửa đổi) ---
-# [ĐÃ SỬA] Thêm tham số content_type
+# --- Hàm _get_random_image_for_page ---
 def _get_random_image_for_page(session: Session, page_id: str, content_type: str):
     config = session.get(PageConfig, page_id)
     if not config: return None, "Page chưa có cấu hình"
@@ -30,25 +29,19 @@ def _get_random_image_for_page(session: Session, page_id: str, content_type: str
 
     if not folder_list: return None, "List folder rỗng"
 
-    # --- [LOGIC MỚI] Lọc Folder theo loại POST/STORY ---
-    required_suffix = f"_{content_type.upper()}" # Tạo hậu tố cần tìm: _POST hoặc _STORY
+    required_suffix = f"_{content_type.upper()}"
     
-    # 1. Truy vấn các Folder có ID nằm trong danh sách của page VÀ tên kết thúc bằng hậu tố
     available_folders = session.exec(
         select(Folder)
         .where(Folder.id.in_(folder_list))
         .where(Folder.name.like(f"%{required_suffix}"))
     ).all()
     
-    # 2. Kiểm tra kết quả lọc
     if not available_folders: 
         return None, f"Không tìm thấy Folder loại {required_suffix} nào trong cấu hình Page."
 
-    # 3. Chọn ngẫu nhiên một folder từ danh sách đã lọc
     target_folder_id = random.choice([f.id for f in available_folders])
-    # --- [KẾT THÚC LOGIC MỚI] ---
     
-    # 4. Lấy ảnh ngẫu nhiên từ folder đã chọn
     image = session.exec(select(Image).where(Image.folder_id == target_folder_id).order_by(func.random()).limit(1)).first()
     
     if not image: return None, f"Folder {target_folder_id} không có ảnh"
@@ -57,13 +50,10 @@ def _get_random_image_for_page(session: Session, page_id: str, content_type: str
 # --- LOGIC MỚI CHO POST VÀ STORY ---
 
 def generate_regular_post(session: Session, page_id: str):
-    # [ĐÃ SỬA] Truyền 'POST' vào hàm helper
     image, error = _get_random_image_for_page(session, page_id, "POST")
     if error: return {"error": error}
 
-    # 2. Lấy Caption (Giữ nguyên logic cũ)
     caption_entry = session.get(FolderCaption, image.folder_id)
-    
     selected_caption = ""
     if caption_entry and caption_entry.captions:
         if isinstance(caption_entry.captions, list) and len(caption_entry.captions) > 0:
@@ -78,11 +68,9 @@ def generate_regular_post(session: Session, page_id: str):
     }
 
 def generate_story_post(session: Session, page_id: str):
-    # [ĐÃ SỬA] Truyền 'STORY' vào hàm helper
     image, error = _get_random_image_for_page(session, page_id, "STORY")
     if error: return {"error": error}
 
-    # 2. Lấy Link (Giữ nguyên logic cũ)
     statement = (
         select(SwipeLink)
         .join(SwipeLinkUsage)
@@ -92,7 +80,6 @@ def generate_story_post(session: Session, page_id: str):
         .limit(1)
     )
     link_obj = session.exec(statement).first()
-    
     final_link = link_obj.link if link_obj else None
 
     return {
@@ -145,14 +132,13 @@ def get_all_folders(session: Session):
 
     result = []
     for folder in folders:
-        # Logic chuẩn: Dựa vào hậu tố _STORY để phân loại
         name_upper = (folder.name or "").upper()
         if name_upper.endswith("_STORY"):
             ftype = "STORY"
         elif name_upper.endswith("_POST"):
             ftype = "POST"
         else:
-            ftype = "OTHER" # Hoặc mặc định là POST tùy bạn
+            ftype = "OTHER"
 
         result.append({
             "id": folder.id,
@@ -184,7 +170,10 @@ def get_all_configs(session: Session):
                 "page_id": config.page_id,
                 "config": {
                     "page_id": config.page_id,
+                    # ĐÃ XÓA enabled
                     "folder_ids": folder_ids,
+                    # ĐÃ XÓA schedule
+                    # ĐÃ XÓA posts_per_slot
                     "page_scale": getattr(config, "page_scale", "SMALL"),
                     "has_recommendation": getattr(config, "has_recommendation", True),
                     "note": getattr(config, "note", None),
@@ -206,9 +195,12 @@ def save_page_config(session: Session, data: dict):
             session.add(Page(page_id=page_id, page_name="Unknown Page"))
 
     config.folder_ids = json.dumps(data.get("folder_ids", []))
-    config.schedule = data.get("schedule", [])
-    config.enabled = data.get("enabled", True)
-    config.posts_per_slot = data.get("posts_per_slot", 1)
+    
+    # ĐÃ XÓA CÁC DÒNG GÂY LỖI NÀY:
+    # config.schedule = ...
+    # config.enabled = ...
+    # config.posts_per_slot = ...
+    
     config.page_scale = data.get("page_scale", getattr(config, "page_scale", "SMALL"))
     config.has_recommendation = data.get(
         "has_recommendation", getattr(config, "has_recommendation", True)
