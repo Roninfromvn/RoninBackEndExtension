@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 import json
 
 from app.database import get_session
-from app.models import Page, PageConfig, Folder
+from app.models import Page, PageConfig, Folder, PageHealth  # Import thêm PageHealth
 
 router = APIRouter()
 
@@ -25,12 +25,15 @@ class ConfigUpdate(BaseModel):
 
 @router.get("/", response_model=List[PageOutput])
 def get_all_pages(session: Session = Depends(get_session)):
-    """Chỉ trả về các Page ĐÃ CẤU HÌNH ĐỦ (Có cả POST và STORY)"""
+    """
+    Trả về danh sách Page hoạt động (Có cả POST và STORY).
+    Kèm theo dữ liệu Followers và Reach mới nhất từ PageHealth.
+    """
     
     # 1. Lấy dữ liệu Page + Config
     results = session.exec(select(Page, PageConfig).join(PageConfig, isouter=True)).all()
     
-    # 2. Lấy map tên Folder để check loại
+    # 2. Lấy map tên Folder để check loại (Dùng cho logic lọc)
     all_folders = session.exec(select(Folder)).all()
     folder_map = {f.id: (f.name or "").upper() for f in all_folders}
 
@@ -51,19 +54,34 @@ def get_all_pages(session: Session = Depends(get_session)):
         
         for fid in f_ids:
             fname = folder_map.get(fid, "")
-            if fname.endswith("_POST"): has_post = True
-            if fname.endswith("_STORY"): has_story = True
+            if "_POST" in fname: has_post = True   # Check thoáng hơn một chút
+            if "_STORY" in fname: has_story = True
         
         # 4. CHỈ LẤY PAGE ĐỦ ĐIỀU KIỆN
         if has_post and has_story:
+            # --- LOGIC MỚI: Lấy Stats ---
+            # Lấy record sức khỏe mới nhất của page này
+            health_record = session.exec(
+                select(PageHealth)
+                .where(PageHealth.page_id == page.page_id)
+                .order_by(PageHealth.record_date.desc()) # Lấy ngày mới nhất
+            ).first()
+
+            followers_count = health_record.followers_total if health_record else 0
+            reach_count = health_record.total_reach if health_record else 0
+            # -----------------------------
+
             output.append({
                 "page_id": page.page_id,
                 "page_name": page.page_name or "Unknown Page",
                 "avatar_url": page.avatar_url,
                 "folder_ids": f_ids,
-                "followers": 0, # Placeholder
-                "reach_yesterday": 0 # Placeholder
+                "followers": followers_count,
+                "reach_yesterday": reach_count
             })
+            
+    # Sort mặc định theo Followers giảm dần để nhìn thấy Page lớn trước
+    output.sort(key=lambda x: x['followers'], reverse=True)
             
     return output
 
@@ -80,51 +98,30 @@ def update_page_config(page_id: str, data: ConfigUpdate, session: Session = Depe
     session.commit()
     return {"status": "success"}
 
+# ... (Giữ nguyên phần PageInput và create_pages_bulk ở dưới)
+
 class PageInput(BaseModel):
-    # Dùng alias để chấp nhận cả "id" (từ Extension) và "page_id"
     page_id: str = Field(alias="id")
-    
-    # Dùng alias để chấp nhận cả "name" (từ Extension) và "page_name"
     page_name: str = Field(alias="name")
-    
-    # Dùng alias để chấp nhận cả "avatarUrl" (từ Extension) và "avatar_url"
     avatar_url: Optional[str] = Field(default=None, alias="avatarUrl")
-    
-    # Các field khác
     isCurrent: Optional[bool] = False
 
     class Config:
-        # Cho phép nhận cả tên gốc (page_id) lẫn alias (id)
         populate_by_name = True
 
 @router.post("/bulk-create")
 def create_pages_bulk(pages: List[PageInput], session: Session = Depends(get_session)):
-    """
-    API nhận danh sách Page từ Extension và thực hiện UPSERT.
-    Đã fix để mapping đúng trường id/name/avatarUrl.
-    """
     count_new = 0
     count_updated = 0
     
     for p in pages:
-        # 1. Tìm xem page này đã có trong DB chưa (kể cả Unknown Page)
         db_page = session.get(Page, p.page_id)
-        
         if db_page:
-            # 2. CẬP NHẬT: Ghi đè thông tin chính xác lên Unknown Page
-            # Chỉ update nếu dữ liệu mới không rỗng
-            if p.page_name:
-                db_page.page_name = p.page_name
-            if p.avatar_url:
-                db_page.avatar_url = p.avatar_url
-            
-            # Nếu page đang là Unknown hoặc NEW thì set thành ACTIVE (tuỳ logic)
-            # if db_page.status == "NEW": db_page.status = "ACTIVE"
-            
+            if p.page_name: db_page.page_name = p.page_name
+            if p.avatar_url: db_page.avatar_url = p.avatar_url
             session.add(db_page)
             count_updated += 1
         else:
-            # 3. TẠO MỚI HOÀN TOÀN
             new_page = Page(
                 page_id=p.page_id,
                 page_name=p.page_name or "Unnamed Page",
