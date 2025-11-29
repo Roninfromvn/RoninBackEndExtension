@@ -1,5 +1,6 @@
 # app/api_dashboard.py
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse  # Proxy ảnh Drive
 from sqlmodel import Session, select, func
 from pydantic import BaseModel
 from typing import List, Optional
@@ -9,6 +10,7 @@ from app.database import get_session, engine
 # [QUAN TRỌNG] Thêm FolderCaption vào dòng import này
 from app.models import Folder, Image, FolderCaption
 from app.sync_service import sync_folder_structure, sync_images_in_folder, sync_all_folders
+from app.drive_service import download_image_from_drive
 
 router = APIRouter()
 
@@ -78,6 +80,26 @@ def trigger_sync_all(background_tasks: BackgroundTasks):
         with Session(engine) as s: sync_all_folders(s)
     background_tasks.add_task(_bg)
     return {"status": "started", "message": "Sync All đang chạy ngầm..."}
+
+
+# --- API MỚI: PROXY ẢNH DRIVE ---
+@router.get("/proxy-image/{file_id}")
+def proxy_drive_image(file_id: str):
+    """
+    Backend lấy ảnh từ Drive và stream thẳng về trình duyệt.
+    Không lưu file vào ổ cứng.
+    """
+    image_stream = download_image_from_drive(file_id)
+
+    if not image_stream:
+        # Trả về ảnh rỗng hoặc lỗi nếu không tải được
+        raise HTTPException(status_code=404, detail="Image not found on Drive")
+
+    # Reset con trỏ file về đầu để đọc
+    image_stream.seek(0)
+
+    # Trả về dạng stream (giả sử là image/jpeg cho phổ biến, trình duyệt tự hiểu)
+    return StreamingResponse(image_stream, media_type="image/jpeg")
 
 # --- PHẦN MỚI: QUẢN LÝ CAPTION ---
 
