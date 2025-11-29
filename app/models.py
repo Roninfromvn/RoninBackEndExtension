@@ -129,6 +129,7 @@ class PostMeta(SQLModel, table=True):
     
     post_id: str = Field(primary_key=True)
     page_id: str = Field(foreign_key="pages.page_id", index=True)
+    folder_id: Optional[str] = Field(default=None, index=True)
     
     created_time: datetime = Field(index=True) # Thời gian đăng bài gốc
     

@@ -30,6 +30,7 @@ class PostMetaInput(BaseModel):
     post_type: Optional[str] = "UNKNOWN"
     permalink: Optional[str] = None
     caption_snippet: Optional[str] = None
+    folder_id: Optional[str] = None
 
 class PostMetricInput(BaseModel):
     post_id: str
@@ -118,7 +119,8 @@ def sync_posts_metadata(posts: List[PostMetaInput], session: Session = Depends(g
                 created_time=c_time,
                 post_type=p.post_type,
                 permalink=p.permalink,
-                caption_snippet=p.caption_snippet
+                caption_snippet=p.caption_snippet,
+                folder_id=p.folder_id
             )
             session.add(new_meta)
             count_new += 1

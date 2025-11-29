@@ -69,7 +69,8 @@ def generate_regular_post(session: Session, page_id: str):
         "image_id": image.id,
         # [SỬA Ở ĐÂY] Dùng BASE_URL thay vì localhost
         "image_url": f"{BASE_URL}/api/image/{image.id}",
-        "caption": selected_caption
+        "caption": selected_caption,
+        "folder_id": image.folder_id,
     }
 
 def generate_story_post(session: Session, page_id: str):
@@ -93,7 +94,8 @@ def generate_story_post(session: Session, page_id: str):
         "page_id": page_id,
         "image_id": image.id,
         "image_url": f"{BASE_URL}/api/image/{image.id}",  # Đã dùng BASE_URL chuẩn
-        "swipe_link": final_link
+        "swipe_link": final_link,
+        "folder_id": image.folder_id,
     }
 
 # --- Hàm MỚI: Dùng cho Content Test/Preview ---
