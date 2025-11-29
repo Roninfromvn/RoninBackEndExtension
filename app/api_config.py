@@ -10,6 +10,8 @@ from app.content_service import save_page_config, get_all_configs, test_content_
 router = APIRouter()
 
 class PageConfigInput(BaseModel):
+    page_name: Optional[str] = None
+    avatar_url: Optional[str] = None
     page_id: str
     folder_ids: List[str]
     page_scale: str = "SMALL"

@@ -195,11 +195,21 @@ def save_page_config(session: Session, data: dict):
     if not page_id:
         return {"error": "Thiếu page_id"}
 
+    # Ensure Page exists and keep its metadata in sync
+    page = session.get(Page, page_id)
+    if not page:
+        page = Page(page_id=page_id)
+        session.add(page)
+
+    if data.get("page_name"):
+        page.page_name = data["page_name"]
+
+    if data.get("avatar_url"):
+        page.avatar_url = data["avatar_url"]
+
     config = session.get(PageConfig, page_id)
     if not config:
         config = PageConfig(page_id=page_id)
-        if not session.get(Page, page_id):
-            session.add(Page(page_id=page_id, page_name="Unknown Page"))
 
     config.folder_ids = json.dumps(data.get("folder_ids", []))
     
