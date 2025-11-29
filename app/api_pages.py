@@ -79,3 +79,47 @@ def update_page_config(page_id: str, data: ConfigUpdate, session: Session = Depe
     session.add(config)
     session.commit()
     return {"status": "success"}
+
+class PageInput(BaseModel):
+    page_id: str
+    page_name: str
+    avatar_url: Optional[str] = None
+    # Các field khác có thể optional
+    isCurrent: Optional[bool] = False
+
+@router.post("/bulk-create")
+def create_pages_bulk(pages: List[PageInput], session: Session = Depends(get_session)):
+    """
+    API nhận danh sách Page từ Extension và thực hiện UPSERT (Cập nhật hoặc Tạo mới).
+    """
+    count_new = 0
+    count_updated = 0
+    
+    for p in pages:
+        # 1. Tìm xem page này đã có trong DB chưa
+        db_page = session.get(Page, p.page_id)
+        
+        if db_page:
+            # 2. NẾU CÓ RỒI -> CẬP NHẬT (Đây là cái bạn cần)
+            db_page.page_name = p.page_name
+            db_page.avatar_url = p.avatar_url
+            # db_page.status = "ACTIVE" # Có thể update thêm trạng thái nếu muốn
+            session.add(db_page)
+            count_updated += 1
+        else:
+            # 3. NẾU CHƯA CÓ -> TẠO MỚI
+            new_page = Page(
+                page_id=p.page_id,
+                page_name=p.page_name,
+                avatar_url=p.avatar_url,
+                status="NEW"
+            )
+            session.add(new_page)
+            count_new += 1
+            
+    session.commit()
+    return {
+        "status": "success",
+        "message": f"Synced {len(pages)} pages",
+        "details": {"new": count_new, "updated": count_updated}
+    }
