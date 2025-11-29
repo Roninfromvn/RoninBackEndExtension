@@ -1,7 +1,9 @@
 # main.py
 import uvicorn
+import os  # Thêm import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # Thêm import StaticFiles
 from sqlmodel import SQLModel
 from app.database import engine
 
@@ -15,6 +17,13 @@ from app.api_pages import router as pages_router
 from app.api_overview import router as overview_router
 
 app = FastAPI(title="Ronin CMS V2")
+
+# Tạo thư mục chứa ảnh nếu chưa có
+os.makedirs("static_images", exist_ok=True)
+
+# Mount thư mục static_images ra đường dẫn /static
+# Ví dụ: file tại "static_images/123/abc.jpg" sẽ truy cập được qua "http://.../static/123/abc.jpg"
+app.mount("/static", StaticFiles(directory="static_images"), name="static")
 
 @app.on_event("startup")
 def on_startup():

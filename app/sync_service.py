@@ -1,183 +1,125 @@
 # app/sync_service.py
-import time
+
 import os
-from typing import Dict
-from sqlmodel import Session, select, delete
-from datetime import datetime
-from dotenv import load_dotenv
+from sqlmodel import Session, select
 
-from app.models import Folder, Image, FolderCaption
-from app.drive_service import get_drive_service
+from app.models import Folder, Image
+from app.drive_service import get_drive_service, download_image_from_drive
 
-load_dotenv()
+# Đường dẫn gốc để lưu ảnh
+STATIC_DIR = "static_images"
 
-# --- HELPER: Lấy danh sách file từ Drive (Tối ưu) ---
-def fetch_all_files_from_drive(service, folder_id: str) -> Dict[str, dict]:
-    query = f"'{folder_id}' in parents and mimeType contains 'image/' and trashed = false"
-    fields = "nextPageToken, files(id, name, thumbnailLink, createdTime, mimeType)"
-    drive_files = {}
-    page_token = None
-    
-    while True:
-        try:
-            response = service.files().list(q=query, fields=fields, pageSize=1000, pageToken=page_token).execute()
-            for f in response.get('files', []):
-                drive_files[f['id']] = {
-                    "name": f.get('name'),
-                    "thumbnail": f.get('thumbnailLink'),
-                    "mime": f.get('mimeType'),
-                    "created": f.get('createdTime')
-                }
-            page_token = response.get('nextPageToken')
-            if not page_token: break
-        except Exception as e:
-            print(f"⚠️ Lỗi fetch Drive (Folder {folder_id}): {e}")
-            break
-    return drive_files
 
-# ======================================================
-# PHA 1: ĐỒNG BỘ CẤU TRÚC (FOLDERS)
-# ======================================================
 def sync_folder_structure(session: Session):
-    """Đồng bộ danh sách Folder: Thêm mới, Xóa cũ, Cập nhật tên."""
-    root_id = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID")
-    if not root_id:
-        print("⚠️ Lỗi: Thiếu Root ID trong .env")
-        return
-
-    print(f"🏗️ [Phase 1] Sync Structure từ Root: {root_id}...")
+    """Quét các thư mục từ Drive và lưu vào DB (Folder table)"""
     service = get_drive_service()
-    
-    # 1. Lấy Drive Data
-    drive_folders_map = {}
-    try:
-        query = f"'{root_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        response = service.files().list(q=query, fields="files(id, name, createdTime)", pageSize=1000).execute()
-        for f in response.get('files', []):
-            drive_folders_map[f['id']] = f
-    except Exception as e:
-        print(f"❌ [Phase 1] Lỗi Drive API: {e}")
+
+    # Tìm folder gốc RONIN_CMS (Bạn cần ID của folder gốc hoặc query theo tên)
+    # Ở đây giả sử query theo tên để tìm folder mẹ
+    query = "mimeType='application/vnd.google-apps.folder' and name='RONIN_CMS' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get("files", [])
+
+    if not items:
+        print("⚠️ Không tìm thấy folder RONIN_CMS trên Drive!")
         return
 
-    drive_ids = set(drive_folders_map.keys())
+    parent_id = items[0]["id"]
 
-    # 2. Lấy DB Data (Chỉ lấy folder thuộc root này)
-    db_folders = session.exec(select(Folder).where(Folder.parent_id == root_id)).all()
-    db_map = {f.id: f for f in db_folders}
-    db_ids = set(db_map.keys())
+    # Liệt kê các folder con (Mèo, Gái xinh...)
+    q_sub = (
+        f"'{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    )
+    folders = (
+        service.files()
+        .list(q=q_sub, fields="files(id, name, createdTime)")
+        .execute()
+        .get("files", [])
+    )
 
-    # 3. Tính toán chênh lệch
-    ids_to_insert = drive_ids - db_ids
-    ids_to_delete = db_ids - drive_ids
-    
-    # Check đổi tên
-    ids_to_check = drive_ids.intersection(db_ids)
-    count_update = 0
-    for fid in ids_to_check:
-        new_name = drive_folders_map[fid]['name']
-        if db_map[fid].name != new_name:
-            db_map[fid].name = new_name
-            session.add(db_map[fid])
-            count_update += 1
-
-    # 4. Thực thi
-    # A. Xóa Folder rác (Xóa cả ảnh và caption bên trong)
-    if ids_to_delete:
-        delete_ids = list(ids_to_delete)
-        
-        # 1. [MỚI] Xóa Caption trước (để tránh lỗi khóa ngoại nếu có)
-        session.exec(delete(FolderCaption).where(FolderCaption.folder_id.in_(delete_ids)))
-        
-        # 2. Xóa Ảnh
-        session.exec(delete(Image).where(Image.folder_id.in_(delete_ids)))
-        
-        # 3. Cuối cùng xóa Folder
-        session.exec(delete(Folder).where(Folder.id.in_(delete_ids)))
-
-    # B. Thêm Folder mới
-    if ids_to_insert:
-        new_folders = []
-        for fid in ids_to_insert:
-            info = drive_folders_map[fid]
-            created_at = None
-            if info.get('createdTime'):
-                try: created_at = datetime.fromisoformat(info['createdTime'].replace("Z", "+00:00"))
-                except: pass
-            
-            new_folders.append(Folder(id=fid, name=info['name'], parent_id=root_id, created_time=created_at))
-        session.bulk_save_objects(new_folders)
+    for f in folders:
+        # Check DB
+        db_folder = session.get(Folder, f["id"])
+        if not db_folder:
+            db_folder = Folder(id=f["id"], name=f["name"])
+            session.add(db_folder)
+        else:
+            db_folder.name = f["name"]
+            session.add(db_folder)
 
     session.commit()
-    print(f"   📊 Kết quả: +{len(ids_to_insert)} mới | -{len(ids_to_delete)} xóa | ✏️ {count_update} đổi tên")
+    print(f"✅ Đã sync {len(folders)} folders.")
 
-# ======================================================
-# PHA 2: ĐỒNG BỘ NỘI DUNG (IMAGES)
-# ======================================================
+
 def sync_images_in_folder(session: Session, folder_id: str):
-    start_time = time.time()
-    service = get_drive_service()
-    
-    # 1. Drive Data
-    drive_map = fetch_all_files_from_drive(service, folder_id)
-    drive_ids = set(drive_map.keys())
-    
-    # 2. DB Data
-    db_ids = set(session.exec(select(Image.id).where(Image.folder_id == folder_id)).all())
-    
-    # 3. Diff
-    ids_to_insert = drive_ids - db_ids
-    ids_to_delete = db_ids - drive_ids
-    
-    # 4. Action
-    if ids_to_delete:
-        delete_list = list(ids_to_delete)
-        for i in range(0, len(delete_list), 1000): # Chunk 1000 để tránh lỗi SQL
-            chunk = delete_list[i:i+1000]
-            session.exec(delete(Image).where(Image.id.in_(chunk)))
-    
-    if ids_to_insert:
-        new_objects = []
-        for fid in ids_to_insert:
-            info = drive_map[fid]
-            created_dt = None
-            if info['created']:
-                try: created_dt = datetime.fromisoformat(info['created'].replace("Z", "+00:00"))
-                except: pass
+    """
+    1. Lấy list ảnh từ Drive trong folder_id
+    2. Lưu vào DB
+    3. Tải file về local disk (static_images/{folder_id}/{filename})
+    """
 
-            img = Image(
-                id=fid, name=info['name'], thumbnail_link=info['thumbnail'],
-                mime_type=info['mime'], created_time=created_dt, folder_id=folder_id
+    service = get_drive_service()
+
+    # Tạo thư mục local tương ứng với folder_id
+    local_folder_path = os.path.join(STATIC_DIR, folder_id)
+    os.makedirs(local_folder_path, exist_ok=True)
+
+    # Query lấy ảnh
+    query = (
+        f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false"
+    )
+    results = (
+        service.files()
+        .list(
+            q=query,
+            fields="files(id, name, thumbnailLink, createdTime)",
+            pageSize=100,  # Lấy 100 ảnh mỗi lần sync cho nhanh
+        )
+        .execute()
+    )
+
+    files = results.get("files", [])
+    synced_count = 0
+    downloaded_count = 0
+
+    for f in files:
+        # 1. Update DB
+        db_img = session.get(Image, f["id"])
+        if not db_img:
+            db_img = Image(
+                id=f["id"],
+                name=f["name"],
+                folder_id=folder_id,
+                thumbnail_link=f.get("thumbnailLink"),
             )
-            new_objects.append(img)
-        session.bulk_save_objects(new_objects)
+            session.add(db_img)
+            synced_count += 1
+
+        # 2. Xử lý tải file về Local (QUAN TRỌNG)
+        file_path = os.path.join(local_folder_path, f["name"])
+
+        # Chỉ tải nếu file chưa tồn tại trên ổ cứng
+        if not os.path.exists(file_path):
+            print(f"⬇️ Đang tải: {f['name']}...")
+            file_stream = download_image_from_drive(f["id"])
+
+            if file_stream:
+                with open(file_path, "wb") as local_file:
+                    local_file.write(file_stream.getbuffer())
+                downloaded_count += 1
+            else:
+                print(f"❌ Lỗi tải file: {f['name']}")
 
     session.commit()
     return {
-        "inserted": len(ids_to_insert),
-        "deleted": len(ids_to_delete),
-        "total": len(drive_ids),
-        "duration": round(time.time() - start_time, 2)
+        "folder_id": folder_id,
+        "total_images": len(files),
+        "new_db_records": synced_count,
+        "downloaded_files": downloaded_count,
     }
 
-# ======================================================
-# SYNC ALL (TUẦN TỰ)
-# ======================================================
+
 def sync_all_folders(session: Session):
-    print("🚀 START SYNC ALL...")
-    sync_folder_structure(session) # Pha 1
-    
-    folders = session.exec(select(Folder)).all() # Pha 2
-    results = []
-    
-    print(f"\n📸 [Phase 2] Quét ảnh cho {len(folders)} folders...")
-    for f in folders:
-        try:
-            res = sync_images_in_folder(session, f.id)
-            print(f"   📂 {f.name}: +{res['inserted']} | -{res['deleted']} ({res['duration']}s)")
-            results.append({**res, "folder": f.name})
-        except Exception as e:
-            print(f"   ❌ Lỗi folder {f.name}: {e}")
-        time.sleep(0.5)
-        
-    print("🏁 DONE.")
-    return results
+    folders = session.exec(select(Folder)).all()
+    for folder in folders:
+        sync_images_in_folder(session, folder.id)
