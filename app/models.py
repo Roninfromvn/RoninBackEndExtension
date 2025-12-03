@@ -37,8 +37,13 @@ class PageConfig(SQLModel, table=True):
     # 5. Mốc thời gian: Dữ liệu trước ngày này coi như đã đủ
     last_synced_date: Optional[datetime] = Field(default=None)
 
+    # 6. Trạng thái Đề xuất
+    current_reco_status: Optional[str] = Field(default="UNKNOWN")
+    
     # Quan hệ
     page: Optional[Page] = Relationship(back_populates="config")
+    
+    
     
 # 3. Bảng Folder
 class Folder(SQLModel, table=True):

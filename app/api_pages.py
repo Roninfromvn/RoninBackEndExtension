@@ -137,3 +137,30 @@ def create_pages_bulk(pages: List[PageInput], session: Session = Depends(get_ses
         "message": f"Synced {len(pages)} pages",
         "details": {"new": count_new, "updated": count_updated}
     }
+
+
+# app/api_pages.py
+
+class PageStatusInput(BaseModel):
+    page_id: str
+    recommendation_status: str # "eligible", "ineligible"...
+
+@router.post("/update-status")
+def update_page_status_api(data: PageStatusInput, session: Session = Depends(get_session)):
+    # 1. Tìm Config của Page
+    config = session.get(PageConfig, data.page_id)
+    if not config:
+        # Nếu chưa có config thì tạo tạm để lưu status
+        config = PageConfig(page_id=data.page_id)
+    
+    # 2. Lưu trạng thái mới (Raw string: eligible/ineligible)
+    config.current_reco_status = data.recommendation_status  
+    
+    # 3. Map sang Boolean để update cột has_recommendation cũ (cho tương thích UI hiện tại)
+    is_green = (data.recommendation_status == "eligible")
+    config.has_recommendation = is_green
+    
+    session.add(config)
+    session.commit()
+    
+    return {"status": "success", "new_state": data.recommendation_status}
