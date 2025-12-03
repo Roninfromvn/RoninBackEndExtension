@@ -6,6 +6,7 @@ import json
 
 from app.database import get_session
 from app.models import Page, PageConfig, Folder, PageHealth  # Import thêm PageHealth
+from app.telegram_service import send_telegram_alert
 
 router = APIRouter()
 
@@ -143,6 +144,7 @@ def create_pages_bulk(pages: List[PageInput], session: Session = Depends(get_ses
 
 class PageStatusInput(BaseModel):
     page_id: str
+    page_name: Optional[str] = None
     recommendation_status: str # "eligible", "ineligible"...
 
 @router.post("/update-status")
@@ -157,7 +159,7 @@ def update_page_status_api(data: PageStatusInput, session: Session = Depends(get
     old_status = config.current_reco_status or "UNKNOWN"
     new_status = data.recommendation_status
     
-    page_name = data.page_name or config.page.page_name if config.page else data.page_id
+    page_name = data.page_name or (config.page.page_name if config.page else data.page_id)
 
     # 3. LOGIC SO SÁNH & BÁO ĐỘNG
     alert_msg = None
