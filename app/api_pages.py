@@ -147,20 +147,51 @@ class PageStatusInput(BaseModel):
 
 @router.post("/update-status")
 def update_page_status_api(data: PageStatusInput, session: Session = Depends(get_session)):
-    # 1. Tìm Config của Page
+    # 1. Tìm Config
     config = session.get(PageConfig, data.page_id)
     if not config:
-        # Nếu chưa có config thì tạo tạm để lưu status
         config = PageConfig(page_id=data.page_id)
+        config.current_reco_status = "UNKNOWN"
+
+    # 2. Lấy trạng thái CŨ và MỚI
+    old_status = config.current_reco_status or "UNKNOWN"
+    new_status = data.recommendation_status
     
-    # 2. Lưu trạng thái mới (Raw string: eligible/ineligible)
-    config.current_reco_status = data.recommendation_status  
-    
-    # 3. Map sang Boolean để update cột has_recommendation cũ (cho tương thích UI hiện tại)
-    is_green = (data.recommendation_status == "eligible")
-    config.has_recommendation = is_green
+    page_name = data.page_name or config.page.page_name if config.page else data.page_id
+
+    # 3. LOGIC SO SÁNH & BÁO ĐỘNG
+    alert_msg = None
+
+    # Trường hợp: Đang XANH/UNKNOWN -> Chuyển sang ĐỎ (Mất đề xuất)
+    if new_status in ["ineligible", "restricted"] and old_status not in ["ineligible", "restricted"]:
+        alert_msg = (
+            f"🚨 <b>CẢNH BÁO MẤT ĐỀ XUẤT!</b>\n\n"
+            f"Page: <b>{page_name}</b>\n"
+            f"ID: <code>{data.page_id}</code>\n"
+            f"Trạng thái cũ: {old_status}\n"
+            f"Trạng thái mới: ❌ <b>{new_status.upper()}</b>\n"
+            f"<i>Hãy vào kiểm tra ngay!</i>"
+        )
+
+    # Trường hợp: Đang ĐỎ -> Chuyển sang XANH (Được thả)
+    elif new_status == "eligible" and old_status in ["ineligible", "restricted"]:
+        alert_msg = (
+            f"✅ <b>TIN VUI: PAGE ĐÃ XANH LẠI!</b>\n\n"
+            f"Page: <b>{page_name}</b>\n"
+            f"ID: <code>{data.page_id}</code>\n"
+            f"Tình trạng: 🟢 <b>Có đề xuất (Eligible)</b>"
+        )
+
+    # 4. Gửi Telegram (Nếu có thông báo)
+    if alert_msg:
+        # Gửi bất đồng bộ hoặc gọi trực tiếp (ở đây gọi trực tiếp cho đơn giản)
+        send_telegram_alert(alert_msg)
+
+    # 5. Cập nhật DB
+    config.current_reco_status = new_status
+    config.has_recommendation = (new_status == "eligible")
     
     session.add(config)
     session.commit()
     
-    return {"status": "success", "new_state": data.recommendation_status}
+    return {"status": "success", "alert": bool(alert_msg)}
