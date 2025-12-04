@@ -52,6 +52,8 @@ class Folder(SQLModel, table=True):
     name: str
     parent_id: Optional[str] = None
     created_time: Optional[datetime] = None
+    tags: List[str] = Field(default=[], sa_column=Column(JSON))
+    note: Optional[str] = Field(default=None, sa_column=Column(Text))
     
     images: List["Image"] = Relationship(back_populates="folder")
     caption_data: Optional["FolderCaption"] = Relationship(back_populates="folder")

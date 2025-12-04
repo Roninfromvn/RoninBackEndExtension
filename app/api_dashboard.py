@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse  # Proxy ảnh Drive
 from sqlmodel import Session, select, func
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime  # <--- Thêm import datetime
+from datetime import datetime
 
 from app.database import get_session, engine
 # [QUAN TRỌNG] Thêm FolderCaption vào dòng import này
@@ -137,3 +137,50 @@ def save_folder_captions(folder_id: str, data: CaptionInput, session: Session = 
     session.commit()
     
     return {"status": "success", "count": len(clean_captions)}
+
+# --- ENDPOINT MỚI: TỔNG HỢP CHO FRONTEND ---
+@router.get("/folder/{folder_id}/detail")
+def get_full_folder_detail(folder_id: str, session: Session = Depends(get_session)):
+    """API tổng hợp phục vụ Ronin Dashboard Detail View"""
+    # 1. Lấy thông tin Folder
+    folder = session.get(Folder, folder_id)
+    if not folder:
+        raise HTTPException(404, "Folder not found")
+        
+    # 2. Đếm số lượng ảnh
+    image_count = session.exec(select(func.count(Image.id)).where(Image.folder_id == folder_id)).one()
+    
+    # 3. Lấy danh sách ảnh (Limit 60 để load nhanh trang đầu)
+    images = session.exec(
+        select(Image)
+        .where(Image.folder_id == folder_id)
+        .order_by(Image.created_time.desc())
+        .limit(60)
+    ).all()
+    
+    # 4. Lấy Captions
+    fc = session.get(FolderCaption, folder_id)
+    captions = fc.captions if fc else []
+
+    # 5. Phân loại
+    upper_name = (folder.name or "").upper()
+    f_type = "POST" if upper_name.endswith("_POST") else "STORY" if upper_name.endswith("_STORY") else "OTHER"
+    
+    # 6. Trả về format đúng với types/index.ts của Frontend
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "type": f_type,
+        "image_count": image_count,
+        "last_synced_at": folder.created_time,
+        "tags": [], # Hiện tại chưa có tags trong DB
+        "note": "", # Hiện tại chưa có note trong DB
+        "images": [
+            {
+                "id": img.id,
+                "thumbnail_link": img.thumbnail_link,
+                "created_at": img.created_time
+            } for img in images
+        ],
+        "captions": captions
+    }
