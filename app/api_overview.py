@@ -55,7 +55,11 @@ class DashboardOverview(BaseModel):
 def get_dashboard_overview(session: Session = Depends(get_session)):
 
     # 1. Lấy tất cả Pages
-    pages = session.exec(select(Page)).all()
+    try:
+        pages = session.exec(select(Page)).all()
+    except Exception as e:
+        print(f"Error fetching pages: {e}")
+        pages = []
 
     # Ngưỡng tính critical (3 ngày)
     critical_threshold = datetime.utcnow() - timedelta(days=3)
@@ -70,21 +74,26 @@ def get_dashboard_overview(session: Session = Depends(get_session)):
     # Lấy record của 24h qua
     yesterday = datetime.utcnow() - timedelta(days=1)
 
-    # Query tổng 24h từ PageHealth
-    sum_24h = session.exec(
-        select(
-            func.sum(PageHealth.link_clicks),
-            func.sum(PageHealth.total_reach),
-            func.sum(PageHealth.followers_total),
-            func.sum(PageHealth.total_interaction)
-        )
-        .where(PageHealth.record_date >= yesterday)
-    ).first()
+    # Query tổng 24h từ PageHealth - WRAP TRY-EXCEPT
+    try:
+        sum_24h = session.exec(
+            select(
+                func.sum(PageHealth.link_clicks),
+                func.sum(PageHealth.total_reach),
+                func.sum(PageHealth.followers_total),
+                func.sum(PageHealth.total_interaction)
+            )
+            .where(PageHealth.record_date >= yesterday)
+        ).first()
 
-    metrics_24h["clicks"] = sum_24h[0] or 0
-    metrics_24h["reach"] = sum_24h[1] or 0
-    metrics_24h["followers"] = sum_24h[2] or 0
-    metrics_24h["interactions"] = sum_24h[3] or 0
+        if sum_24h:
+            metrics_24h["clicks"] = sum_24h[0] or 0
+            metrics_24h["reach"] = sum_24h[1] or 0
+            metrics_24h["followers"] = sum_24h[2] or 0
+            metrics_24h["interactions"] = sum_24h[3] or 0
+    except Exception as e:
+        print(f"Error querying PageHealth: {e}")
+        # Keep defaults (all 0)
 
     # 2. Xử lý từng Page
     active_count = 0
@@ -96,41 +105,57 @@ def get_dashboard_overview(session: Session = Depends(get_session)):
         if page.status == "ACTIVE":
             active_count += 1
 
-        # Check Critical theo last_post_time
+        # Check Critical theo last_post_time - WRAP TRY-EXCEPT
         is_critical = False
-        # (Logic check time string của bạn)
-        if hasattr(page, 'last_post_time') and page.last_post_time:
-            try:
-                # Xử lý string ISO có thể chứa 'Z'
+        try:
+            if hasattr(page, 'last_post_time') and page.last_post_time:
                 last_post_dt = datetime.fromisoformat(str(page.last_post_time).replace("Z", "+00:00"))
                 if last_post_dt < critical_threshold:
                     is_critical = True
-            except:
-                pass
+        except Exception as e:
+            # Nếu parse lỗi, skip
+            pass
 
-        # Check Critical nâng cao: Có bài viết nào trong bảng PostMeta 3 ngày qua không?
-        has_post_recent = session.exec(
-            select(func.count(PostMeta.post_id))
-            .where(PostMeta.page_id == page.page_id)
-            .where(PostMeta.created_time >= critical_threshold)
-        ).one()
-
-        if has_post_recent == 0:
-            is_critical = True
+        # Check Critical từ PostMeta - WRAP TRY-EXCEPT
+        try:
+            has_post_recent = session.exec(
+                select(func.count(PostMeta.post_id))
+                .where(PostMeta.page_id == page.page_id)
+                .where(PostMeta.created_time >= critical_threshold)
+            ).one()
+            
+            if has_post_recent == 0:
+                is_critical = True
+        except Exception as e:
+            # Bảng PostMeta có thể chưa có data hoặc lỗi query
+            print(f"Warning: PostMeta query failed for {page.page_id}: {e}")
+            pass
         
         if is_critical:
             critical_count += 1
 
-        # Lấy health mới nhất của từng page
-        latest_health = session.exec(
-            select(PageHealth)
-            .where(PageHealth.page_id == page.page_id)
-            .order_by(PageHealth.record_date.desc())
-        ).first()
+        # Lấy health mới nhất của từng page - WRAP TRY-EXCEPT
+        followers_curr = 0
+        reach_curr = 0
+        interact_curr = 0
+        
+        try:
+            latest_health = session.exec(
+                select(PageHealth)
+                .where(PageHealth.page_id == page.page_id)
+                .order_by(PageHealth.record_date.desc())
+            ).first()
 
-        followers_curr = latest_health.followers_total if latest_health else (page.followers or 0)
-        reach_curr = latest_health.total_reach if latest_health else 0
-        interact_curr = latest_health.total_interaction if latest_health else 0
+            if latest_health:
+                followers_curr = latest_health.followers_total or 0
+                reach_curr = latest_health.total_reach or 0
+                interact_curr = latest_health.total_interaction or 0
+            else:
+                # Fallback to page.followers if exists
+                followers_curr = getattr(page, 'followers', 0) or 0
+        except Exception as e:
+            print(f"Error fetching PageHealth for {page.page_id}: {e}")
+            followers_curr = getattr(page, 'followers', 0) or 0
 
         # Cộng dồn chỉ số hiện tại (Latest Metrics)
         metrics_latest["followers"] += followers_curr
@@ -141,12 +166,12 @@ def get_dashboard_overview(session: Session = Depends(get_session)):
         top_pages_buffer.append({
             "page_id": page.page_id,
             "page_name": page.page_name or "Unnamed",
-            "avatar_url": page.avatar_url,
+            "avatar_url": getattr(page, 'avatar_url', None),
             "followers": followers_curr,
-            "reach_24h": reach_curr, # Tạm dùng reach mới nhất làm đại diện
+            "reach_24h": reach_curr,
             "interactions_24h": interact_curr,
-            "status": page.status,
-            "last_post_time": str(page.last_post_time) if hasattr(page, 'last_post_time') else None,
+            "status": getattr(page, 'status', None),
+            "last_post_time": str(page.last_post_time) if hasattr(page, 'last_post_time') and page.last_post_time else None,
             "is_critical": is_critical,
             "sort_key": reach_curr
         })
