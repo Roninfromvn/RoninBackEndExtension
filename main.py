@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles  # Thêm import StaticFiles
 from sqlmodel import SQLModel
 from app.database import engine
+from fastapi import Depends
+
 
 # Import Routers
 from app.api_analytics import router as analytics_router
@@ -15,6 +17,7 @@ from app.api_config import router as config_router
 from app.api_links import router as links_router
 from app.api_pages import router as pages_router
 from app.api_overview import router as overview_router
+from app.auth import verify_api_key
 
 app = FastAPI(title="Ronin CMS V2")
 
@@ -44,13 +47,14 @@ def read_root():
     return {"status": "Ronin Backend Running 🚀"}
 
 # Register Routers
-app.include_router(analytics_router, prefix="/api", tags=["Analytics"])
-app.include_router(extension_router, prefix="/api", tags=["Extension"])
-app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
-app.include_router(config_router, prefix="/api/config", tags=["Config"])
-app.include_router(links_router, prefix="/api/links", tags=["Links"])
-app.include_router(pages_router, prefix="/api/pages", tags=["Pages"])
-app.include_router(overview_router, prefix="/api/overview", tags=["Overview"])
+app.include_router(analytics_router, prefix="/api", tags=["Analytics"], dependencies=[Depends(verify_api_key)])
+app.include_router(extension_router, prefix="/api", tags=["Extension"], dependencies=[Depends(verify_api_key)])
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(verify_api_key)])
+app.include_router(config_router, prefix="/api/config", tags=["Config"], dependencies=[Depends(verify_api_key)])
+app.include_router(links_router, prefix="/api/links", tags=["Links"], dependencies=[Depends(verify_api_key)])
+app.include_router(pages_router, prefix="/api/pages", tags=["Pages"], dependencies=[Depends(verify_api_key)])
+app.include_router(overview_router, prefix="/api/overview", tags=["Overview"], dependencies=[Depends(verify_api_key)])
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=3210, reload=True)
