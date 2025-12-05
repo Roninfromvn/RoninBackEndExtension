@@ -114,10 +114,14 @@ def get_page_ranking(
     sort: str = Query("reach.desc", description="Sort format: metric.asc|desc"),
     page: int = Query(1, ge=1),
     per: int = Query(50, ge=1, le=200),
+    # --- CÁC THAM SỐ MỚI CHO FILTER ---
+    search: Optional[str] = Query(None, description="Search by name or ID"),
+    status: Optional[str] = Query("ALL", description="Filter by status: ACTIVE, RESTRICTED, DIE"),
+    size: Optional[str] = Query("ALL", description="Filter by size: SMALL, MEDIUM, LARGE"),
     session: Session = Depends(get_session)
 ):
-    """Get ranked list of active pages with metrics and percentiles"""
-    # Parse date range
+    """Get ranked list of active pages with metrics, percentiles and filters"""
+    # 1. Xử lý Date Range
     if start and end:
         try:
             start_date = date.fromisoformat(start)
@@ -127,23 +131,53 @@ def get_page_ranking(
     else:
         start_date, end_date = get_default_date_range()
     
-    # Parse sort
+    # 2. Xử lý Sort
     sort_parts = sort.split(".")
     if len(sort_parts) != 2:
-        raise HTTPException(status_code=400, detail="Invalid sort format. Use metric.asc|desc")
-    sort_metric, sort_dir = sort_parts
+        sort_metric = "reach"
+        sort_direction = "DESC"
+    else:
+        sort_metric, sort_dir = sort_parts
+        sort_direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     
-    valid_metrics = {"reach", "impressions", "clicks", "engagement"}
-    if sort_metric not in valid_metrics:
-        raise HTTPException(status_code=400, detail=f"Invalid sort metric. Use: {valid_metrics}")
-    
-    sort_direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     offset = (page - 1) * per
     
-    # Build query - uses raw aggregate from post metrics (no MV needed for now)
-    active_pages_cte = get_active_pages_cte()
+    # 3. Chuẩn bị Filter Params cho SQL
+    # Logic Active Page CTE (giữ nguyên logic _POST và _STORY)
+    active_pages_cte = """
+    active_pages AS (
+        SELECT p.page_id, p.page_name, p.status
+        FROM pages p
+        JOIN page_configs pc ON pc.page_id = p.page_id
+        WHERE pc.folder_ids IS NOT NULL
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(pc.folder_ids::jsonb) AS fid
+            JOIN folders f ON f.id::text = fid
+            WHERE f.name ILIKE '%_POST%'
+            LIMIT 1
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(pc.folder_ids::jsonb) AS fid2
+            JOIN folders f2 ON f2.id::text = fid2
+            WHERE f2.name ILIKE '%_STORY%'
+            LIMIT 1
+          )
+          AND (
+              :search IS NULL OR 
+              p.page_name ILIKE ('%' || :search || '%') OR 
+              p.page_id ILIKE ('%' || :search || '%')
+          )
+          AND (
+              :status_filter = 'ALL' OR 
+              p.status = :status_filter
+          )
+    )
+    """
     
-    query = text(f"""
+    # 4. QUERY CHÍNH (Đã update active_pages để lọc sớm search/status)
+    query_str = f"""
     WITH {active_pages_cte},
     post_snapshots AS (
         SELECT DISTINCT ON (am.page_id, pm.post_id, ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date)
@@ -197,8 +231,7 @@ def get_page_ranking(
     with_followers AS (
         SELECT
             wp.*,
-            COALESCE(start_snap.followers_total, 0) AS followers_start,
-            COALESCE(end_snap.followers_total, 0) AS followers_end,
+            COALESCE(end_snap.followers_total, 0) AS followers_total,
             COALESCE(end_snap.followers_total, 0) - COALESCE(start_snap.followers_total, 0) AS followers_delta
         FROM with_percentiles wp
         LEFT JOIN LATERAL (
@@ -217,33 +250,32 @@ def get_page_ranking(
             ORDER BY record_date DESC
             LIMIT 1
         ) end_snap ON true
+    ),
+    final_filtered AS (
+        SELECT * FROM with_followers
+        WHERE 
+            (:size_filter = 'ALL') OR
+            (:size_filter = 'SMALL' AND followers_total < 10000) OR
+            (:size_filter = 'MEDIUM' AND followers_total >= 10000 AND followers_total < 100000) OR
+            (:size_filter = 'LARGE' AND followers_total >= 100000)
     )
     SELECT 
-        page_id,
-        page_name,
-        status,
-        followers_end AS followers_total,
-        followers_delta,
-        reach,
-        impressions,
-        clicks,
-        engagement,
-        ctr,
-        reach_percentile,
-        clicks_percentile,
-        impressions_percentile,
-        engagement_percentile,
+        *,
         COUNT(*) OVER() AS total_count
-    FROM with_followers
+    FROM final_filtered
     ORDER BY {sort_metric} {sort_direction}
     LIMIT :per OFFSET :offset
-    """)
-    
-    result = session.exec(query, params={
+    """
+
+    # Thực thi Query
+    result = session.exec(text(query_str), params={
         "start_date": start_date,
         "end_date": end_date,
         "per": per,
-        "offset": offset
+        "offset": offset,
+        "search": search,
+        "status_filter": status or "ALL",
+        "size_filter": size or "ALL"
     })
     
     rows = result.fetchall()
