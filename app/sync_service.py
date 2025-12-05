@@ -27,6 +27,7 @@ def parse_drive_datetime(iso_string: Optional[str]) -> Optional[datetime]:
 
 def sync_folder_structure(session: Session, root_folder_name: str = "RONIN_CMS") -> Dict:
     try:
+        logger.info(f"📁 Bắt đầu sync cấu trúc folder...")
         service = get_drive_service()
 
         # Tìm folder gốc
@@ -97,7 +98,7 @@ def sync_folder_structure(session: Session, root_folder_name: str = "RONIN_CMS")
             deleted += 1
 
         session.commit()
-
+        logger.info(f"✅ Sync structure hoàn tất: {new} mới, {updated} cập nhật, {deleted} xóa")
         return {
             "success": True,
             "total_folders": len(all_folders),
@@ -108,6 +109,7 @@ def sync_folder_structure(session: Session, root_folder_name: str = "RONIN_CMS")
 
     except Exception as e:
         session.rollback()
+        logger.error(f"❌ Lỗi sync structure: {str(e)}")  
         return {"success": False, "error": str(e)}
 
 
@@ -119,6 +121,7 @@ def sync_images_in_folder(session: Session, folder_id: str) -> Dict:
     → KHÔNG XOÁ FILE
     """
     try:
+        logger.info(f"🖼️ Sync images folder: {folder_id}")
         service = get_drive_service()
 
         query = (
@@ -195,7 +198,7 @@ def sync_images_in_folder(session: Session, folder_id: str) -> Dict:
             deleted_db += 1
 
         session.commit()
-
+        logger.info(f"✅ Folder {folder_id}: {new_db} mới, {updated_db} cập nhật, {deleted_db} xóa")
         return {
             "success": True,
             "folder_id": folder_id,
@@ -207,6 +210,7 @@ def sync_images_in_folder(session: Session, folder_id: str) -> Dict:
 
     except Exception as e:
         session.rollback()
+        logger.error(f"❌ Lỗi sync folder {folder_id}: {str(e)}")
         return {"success": False, "folder_id": folder_id, "error": str(e)}
 
 
@@ -224,5 +228,5 @@ def sync_all_folders(session: Session) -> List[Dict]:
     for folder in folders:
         res = sync_images_in_folder(session, folder.id)
         results.append(res)
-
+    logger.info(f"🏁 Sync toàn bộ hoàn tất: {len(results)} folders")
     return results
