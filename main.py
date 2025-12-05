@@ -44,7 +44,8 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"Địt con mẹ cả nhà thằng Pháp Lê"}
+    return {"message": "Địt con mẹ cả nhà thằng Pháp Lê"}
+
 
 # Register Routers
 app.include_router(analytics_router, prefix="/api", tags=["Analytics"], dependencies=[Depends(verify_api_key)])
