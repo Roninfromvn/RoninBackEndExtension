@@ -360,7 +360,7 @@ def get_page_detail(
         "start_date": start_date, 
         "end_date": end_date
     })
-    page_health_data = {str(row.date): row for row in page_health_result.fetchall()}
+    page_health_data = {str(row.date)[:10]: row for row in page_health_result.fetchall()}
     
     # Get impressions per day from post_metric
     impressions_query = text("""
@@ -387,7 +387,7 @@ def get_page_detail(
         "start_date": start_date, 
         "end_date": end_date
     })
-    impressions_data = {str(row.date): row.impressions for row in impressions_result.fetchall()}
+    impressions_data = {str(row.date)[:10]: row.impressions for row in impressions_result.fetchall()}
     
     # Merge page_health + impressions into timeseries
     all_dates = sorted(set(page_health_data.keys()) | set(impressions_data.keys()))
