@@ -189,7 +189,7 @@ def get_page_ranking(
             COALESCE((cume_dist() OVER (ORDER BY pm.clicks DESC) * 100), 0)::numeric(5,2) AS clicks_percentile,
             COALESCE((cume_dist() OVER (ORDER BY pm.engagement DESC) * 100), 0)::numeric(5,2) AS engagement_percentile,
             CASE 
-                WHEN pm.impressions > 0 THEN (pm.clicks::numeric / NULLIF(pm.impressions, 0) * 100)
+                WHEN pm.reach > 0 THEN (pm.clicks::numeric / NULLIF(pm.reach, 0) * 100)
                 ELSE 0 
             END AS ctr
         FROM page_metrics pm
