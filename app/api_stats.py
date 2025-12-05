@@ -19,7 +19,7 @@ router = APIRouter()
 class PageRankingItem(BaseModel):
     page_id: str
     page_name: str
-    status: Optional[str] = None
+    reco_status: Optional[str] = None
     followers_total: int = 0
     followers_delta: int = 0
     reach: int = 0
@@ -57,7 +57,7 @@ class TopPost(BaseModel):
 class PageDetailResponse(BaseModel):
     page_id: str
     page_name: str
-    status: Optional[str] = None
+    reco_status: Optional[str] = None  # RECOMMENDED, NOT_RECOMMENDED, UNKNOWN
     followers_total: int = 0
     followers_delta: int = 0
     timeseries: List[TimeseriesPoint] = []
@@ -116,7 +116,7 @@ def get_page_ranking(
     per: int = Query(50, ge=1, le=200),
     # --- CÁC THAM SỐ MỚI CHO FILTER ---
     search: Optional[str] = Query(None, description="Search by name or ID"),
-    status: Optional[str] = Query("ALL", description="Filter by status: ACTIVE, RESTRICTED, DIE"),
+    reco: Optional[str] = Query("ALL", description="Filter by reco: RECOMMENDED, NOT_RECOMMENDED, UNKNOWN"),
     size: Optional[str] = Query("ALL", description="Filter by size: SMALL, MEDIUM, LARGE"),
     session: Session = Depends(get_session)
 ):
@@ -146,7 +146,7 @@ def get_page_ranking(
     # Logic Active Page CTE (giữ nguyên logic _POST và _STORY)
     active_pages_cte = """
     active_pages AS (
-        SELECT p.page_id, p.page_name, p.status
+        SELECT p.page_id, p.page_name, COALESCE(pc.current_reco_status, 'UNKNOWN') AS reco_status
         FROM pages p
         JOIN page_configs pc ON pc.page_id = p.page_id
         WHERE pc.folder_ids IS NOT NULL
@@ -170,8 +170,8 @@ def get_page_ranking(
               p.page_id ILIKE ('%' || :search || '%')
           )
           AND (
-              :status_filter = 'ALL' OR 
-              p.status = :status_filter
+              :reco_filter = 'ALL' OR 
+              COALESCE(pc.current_reco_status, 'UNKNOWN') = :reco_filter
           )
     )
     """
@@ -205,7 +205,7 @@ def get_page_ranking(
         SELECT
             ap.page_id,
             ap.page_name,
-            ap.status,
+            ap.reco_status,
             COALESCE(pha.total_reach, 0)::bigint AS reach,
             COALESCE(SUM(ps.impressions), 0)::bigint AS impressions,
             COALESCE(pha.total_link_clicks, 0)::bigint AS clicks,
@@ -213,7 +213,7 @@ def get_page_ranking(
         FROM active_pages ap
         LEFT JOIN post_snapshots ps ON ps.page_id = ap.page_id
         LEFT JOIN page_health_agg pha ON pha.page_id = ap.page_id
-        GROUP BY ap.page_id, ap.page_name, ap.status, pha.total_reach, pha.total_interaction, pha.total_link_clicks
+        GROUP BY ap.page_id, ap.page_name, ap.reco_status, pha.total_reach, pha.total_interaction, pha.total_link_clicks
     ),
     with_percentiles AS (
         SELECT
@@ -274,7 +274,7 @@ def get_page_ranking(
         "per": per,
         "offset": offset,
         "search": search,
-        "status_filter": status or "ALL",
+        "reco_filter": reco or "ALL",
         "size_filter": size or "ALL"
     })
     
@@ -289,7 +289,7 @@ def get_page_ranking(
         PageRankingItem(
             page_id=row.page_id,
             page_name=row.page_name or "Unknown",
-            status=row.status,
+            reco_status=row.reco_status or "UNKNOWN",
             followers_total=row.followers_total or 0,
             followers_delta=row.followers_delta or 0,
             reach=row.reach or 0,
