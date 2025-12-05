@@ -51,6 +51,7 @@ class TopPost(BaseModel):
     impressions: int = 0
     clicks: int = 0
     engagement: int = 0
+    ctr: float = 0.0
     permalink: Optional[str] = None
 
 class PageDetailResponse(BaseModel):
@@ -401,6 +402,7 @@ def get_page_detail(
             impressions=row.impressions or 0,
             clicks=row.clicks or 0,
             engagement=row.engagement or 0,
+            ctr=round((row.clicks / row.impressions * 100), 2) if row.impressions and row.impressions > 0 else 0.0,
             permalink=row.permalink
         )
         for row in top_posts_result.fetchall()
@@ -530,6 +532,7 @@ def get_top_posts(
             impressions=row.impressions or 0,
             clicks=row.clicks or 0,
             engagement=row.engagement or 0,
+            ctr=round((row.clicks / row.impressions * 100), 2) if row.impressions and row.impressions > 0 else 0.0,
             permalink=row.permalink
         )
         for row in rows
