@@ -18,9 +18,12 @@ class PageOutput(BaseModel):
     folder_ids: List[str] = []
     followers: int = 0
     reach_yesterday: int = 0
+    note: Optional[str] = None
 
 class ConfigUpdate(BaseModel):
-    folder_ids: List[str]
+    folder_ids: Optional[List[str]] = None
+    note: Optional[str] = None
+
 
 # --- Endpoints ---
 
@@ -78,7 +81,8 @@ def get_all_pages(session: Session = Depends(get_session)):
                 "avatar_url": page.avatar_url,
                 "folder_ids": f_ids,
                 "followers": followers_count,
-                "reach_yesterday": reach_count
+                "reach_yesterday": reach_count,
+                "note": config.note if config else None
             })
             
     # Sort mặc định theo Followers giảm dần để nhìn thấy Page lớn trước
@@ -94,7 +98,10 @@ def update_page_config(page_id: str, data: ConfigUpdate, session: Session = Depe
         config = PageConfig(page_id=page_id)
     
     # Lưu dạng JSON string để đồng bộ với cách Extension đọc
-    config.folder_ids = json.dumps(data.folder_ids)
+    if data.folder_ids is not None:
+        config.folder_ids = json.dumps(data.folder_ids)
+    if data.note is not None:
+        config.note = data.note
     session.add(config)
     session.commit()
     return {"status": "success"}
