@@ -19,6 +19,8 @@ class PageOutput(BaseModel):
     followers: int = 0
     reach_yesterday: int = 0
     note: Optional[str] = None
+    has_recommendation: bool = True
+
 
 class ConfigUpdate(BaseModel):
     folder_ids: Optional[List[str]] = None
@@ -83,6 +85,7 @@ def get_all_pages(session: Session = Depends(get_session)):
                 "followers": followers_count,
                 "reach_yesterday": reach_count,
                 "note": config.note if config else None
+                "has_recommendation": config.has_recommendation if config else True
             })
             
     # Sort mặc định theo Followers giảm dần để nhìn thấy Page lớn trước
