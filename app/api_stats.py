@@ -330,52 +330,76 @@ def get_page_detail(
         start_date, end_date = get_default_date_range()
     
     # Get page info
-    page_query = text("SELECT page_id, page_name, status FROM pages WHERE page_id = :page_id")
+    page_query = text("""
+    SELECT p.page_id, p.page_name, COALESCE(pc.current_reco_status, 'UNKNOWN') AS reco_status 
+    FROM pages p 
+    LEFT JOIN page_configs pc ON pc.page_id = p.page_id 
+    WHERE p.page_id = :page_id
+""")
     page_result = session.exec(page_query, params={"page_id": page_id})
     page_row = page_result.fetchone()
     
     if not page_row:
         raise HTTPException(status_code=404, detail="Page not found")
     
-    # Get timeseries - aggregate per day
-    timeseries_query = text("""
-        WITH daily_data AS (
-            SELECT DISTINCT ON (pm.post_id, ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date)
-                ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date AS day_local,
-                pm.reach, pm.impressions, pm.clicks,
-                COALESCE(pm.reactions, 0) + COALESCE(pm.comments, 0) + COALESCE(pm.shares, 0) AS engagement_value
-            FROM analytics_post_metric pm
-            JOIN analytics_post_meta am ON am.post_id = pm.post_id
-            WHERE am.page_id = :page_id
-                AND ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date BETWEEN :start_date AND :end_date
-            ORDER BY pm.post_id, day_local, pm.updated_at DESC
-        )
-        SELECT
-            day_local as date,
-            COALESCE(SUM(reach), 0) AS reach,
-            COALESCE(SUM(impressions), 0) AS impressions,
-            COALESCE(SUM(clicks), 0) AS clicks,
-            COALESCE(SUM(engagement_value), 0) AS engagement
-        FROM daily_data
-        GROUP BY day_local
-        ORDER BY day_local ASC
+    # Get timeseries from page_health (reach, clicks, engagement)
+    page_health_query = text("""
+        SELECT 
+            record_date AS date,
+            COALESCE(total_reach, 0) AS reach,
+            COALESCE(link_clicks, 0) AS clicks,
+            COALESCE(total_interaction, 0) AS engagement
+        FROM analytics_page_health
+        WHERE page_id = :page_id
+          AND record_date BETWEEN :start_date AND :end_date
+        ORDER BY record_date ASC
     """)
     
-    timeseries_result = session.exec(timeseries_query, params={
+    page_health_result = session.exec(page_health_query, params={
         "page_id": page_id, 
         "start_date": start_date, 
         "end_date": end_date
     })
+    page_health_data = {str(row.date): row for row in page_health_result.fetchall()}
     
+    # Get impressions per day from post_metric
+    impressions_query = text("""
+        WITH daily_snapshots AS (
+            SELECT DISTINCT ON (pm.post_id, ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date)
+                ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date AS day_local,
+                pm.impressions
+            FROM analytics_post_metric pm
+            JOIN analytics_post_meta am ON am.post_id = pm.post_id
+            WHERE am.page_id = :page_id
+                AND ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date BETWEEN :start_date AND :end_date
+            ORDER BY pm.post_id, ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date, pm.updated_at DESC
+        )
+        SELECT 
+            day_local AS date,
+            COALESCE(SUM(impressions), 0) AS impressions
+        FROM daily_snapshots
+        GROUP BY day_local
+        ORDER BY day_local ASC
+    """)
+    
+    impressions_result = session.exec(impressions_query, params={
+        "page_id": page_id, 
+        "start_date": start_date, 
+        "end_date": end_date
+    })
+    impressions_data = {str(row.date): row.impressions for row in impressions_result.fetchall()}
+    
+    # Merge page_health + impressions into timeseries
+    all_dates = sorted(set(page_health_data.keys()) | set(impressions_data.keys()))
     timeseries = [
         TimeseriesPoint(
-            date=str(row.date),
-            reach=row.reach or 0,
-            impressions=row.impressions or 0,
-            clicks=row.clicks or 0,
-            engagement=row.engagement or 0
+            date=d,
+            reach=page_health_data[d].reach if d in page_health_data else 0,
+            impressions=impressions_data.get(d, 0),
+            clicks=page_health_data[d].clicks if d in page_health_data else 0,
+            engagement=page_health_data[d].engagement if d in page_health_data else 0
         )
-        for row in timeseries_result.fetchall()
+        for d in all_dates
     ]
     
     # Summary
@@ -466,7 +490,7 @@ def get_page_detail(
     return PageDetailResponse(
         page_id=page_row.page_id,
         page_name=page_row.page_name or "Unknown",
-        status=page_row.status,
+        reco_status=page_row.reco_status,
         followers_total=followers_total,
         followers_delta=followers_delta,
         timeseries=timeseries,
