@@ -156,6 +156,14 @@ def get_page_ranking(
         WHERE ((pm.updated_at AT TIME ZONE 'UTC') + INTERVAL '7 hours')::date BETWEEN :start_date AND :end_date
         ORDER BY am.page_id, pm.post_id, day_local, pm.updated_at DESC
     ),
+    page_health_agg AS (
+        SELECT
+            page_id,
+            SUM(link_clicks) AS total_link_clicks
+        FROM analytics_page_health
+        WHERE record_date BETWEEN :start_date AND :end_date
+        GROUP BY page_id
+    ),
     page_metrics AS (
         SELECT
             ap.page_id,
@@ -163,12 +171,12 @@ def get_page_ranking(
             ap.status,
             COALESCE(SUM(ps.reach), 0)::bigint AS reach,
             COALESCE(SUM(ps.impressions), 0)::bigint AS impressions,
-            COALESCE(SUM(ph.link_clicks), 0)::bigint AS clicks,
+            COALESCE(pha.total_link_clicks, 0)::bigint AS clicks,
             COALESCE(SUM(ps.engagement_value), 0)::bigint AS engagement
         FROM active_pages ap
         LEFT JOIN post_snapshots ps ON ps.page_id = ap.page_id
-        LEFT JOIN analytics_page_health ph ON ph.page_id = ap.page_id AND ph.record_date BETWEEN :start_date AND :end_date
-        GROUP BY ap.page_id, ap.page_name, ap.status
+        LEFT JOIN page_health_agg pha ON pha.page_id = ap.page_id
+        GROUP BY ap.page_id, ap.page_name, ap.status, pha.total_link_clicks
     ),
     with_percentiles AS (
         SELECT
