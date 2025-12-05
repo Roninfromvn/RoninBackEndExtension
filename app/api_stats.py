@@ -163,10 +163,11 @@ def get_page_ranking(
             ap.status,
             COALESCE(SUM(ps.reach), 0)::bigint AS reach,
             COALESCE(SUM(ps.impressions), 0)::bigint AS impressions,
-            COALESCE(SUM(ps.clicks), 0)::bigint AS clicks,
+            COALESCE(SUM(ph.link_clicks), 0)::bigint AS clicks,
             COALESCE(SUM(ps.engagement_value), 0)::bigint AS engagement
         FROM active_pages ap
         LEFT JOIN post_snapshots ps ON ps.page_id = ap.page_id
+        LEFT JOIN analytics_page_health ph ON ph.page_id = ap.page_id AND ph.record_date BETWEEN :start_date AND :end_date
         GROUP BY ap.page_id, ap.page_name, ap.status
     ),
     with_percentiles AS (
