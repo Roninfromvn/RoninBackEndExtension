@@ -84,7 +84,7 @@ def get_all_pages(session: Session = Depends(get_session)):
                 "folder_ids": f_ids,
                 "followers": followers_count,
                 "reach_yesterday": reach_count,
-                "note": config.note if config else None
+                "note": config.note if config else None,
                 "has_recommendation": config.has_recommendation if config else True
             })
             
