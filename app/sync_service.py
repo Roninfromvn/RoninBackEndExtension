@@ -25,7 +25,7 @@ def parse_drive_datetime(iso_string: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def sync_folder_structure(session: Session, root_folder_name: str = "RONIN_CMS") -> Dict:
+def sync_folder_structure(session: Session, root_folder_name: str = "TRAFFIC CONTENT") -> Dict:
     try:
         logger.info(f"📁 Bắt đầu sync cấu trúc folder...")
         service = get_drive_service()
