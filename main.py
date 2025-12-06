@@ -24,7 +24,12 @@ from app.auth import verify_api_key
 # Import auth models to create tables
 from app.models_auth import User, UserPageAccess
 
-app = FastAPI(title="Ronin CMS V2")
+app = FastAPI(
+    title="Roninfromvn",
+    docs_url=None,      # Tắt /docs
+    redoc_url=None      # Tắt /redoc (nếu có)
+)
+
 
 # Tạo thư mục chứa ảnh nếu chưa có
 os.makedirs("static_images", exist_ok=True)
