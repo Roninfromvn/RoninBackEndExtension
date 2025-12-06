@@ -167,3 +167,34 @@ async def logout():
     # JWT is stateless, so just return success
     # Client is responsible for removing the token
     return {"message": "Logged out successfully"}
+
+
+
+# Thêm vào cuối file app/api_auth.py
+from app.auth import verify_api_key
+
+async def verify_stats_access(
+    user: Optional[User] = Depends(get_optional_user),
+    x_ronin_key: str = Header(None)
+):
+    """
+    Cho phép truy cập nếu:
+    1. Có User đăng nhập (từ Dashboard)
+    2. HOẶC có API Key đúng (từ Extension)
+    """
+    # Case 1: Dashboard User
+    if user:
+        return user
+    
+    # Case 2: Extension (API Key)
+    # Tự verify key thủ công vì verify_api_key gốc raise lỗi luôn
+    import os
+    API_KEY = os.getenv("API_KEY", "DITCONMETHANGPHAPLEDITCONMETHANGPHAPLE")
+    if x_ronin_key == API_KEY:
+        return None # Valid system key (no specific user)
+
+    # Không thỏa mãn cả 2 -> Chặn
+    raise HTTPException(
+        status_code=401, 
+        detail="Unauthorized: Requires Login or API Key"
+    )

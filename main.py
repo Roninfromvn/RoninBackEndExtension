@@ -18,7 +18,7 @@ from app.api_links import router as links_router
 from app.api_pages import router as pages_router
 from app.api_overview import router as overview_router
 from app.api_stats import router as stats_router
-from app.api_auth import router as auth_router
+from app.api_auth import router as auth_router, verify_stats_access
 from app.auth import verify_api_key
 
 # Import auth models to create tables
@@ -60,7 +60,7 @@ app.include_router(config_router, prefix="/api/config", tags=["Config"], depende
 app.include_router(links_router, prefix="/api/links", tags=["Links"], dependencies=[Depends(verify_api_key)])
 app.include_router(pages_router, prefix="/api/pages", tags=["Pages"], dependencies=[Depends(verify_api_key)])
 app.include_router(overview_router, prefix="/api/overview", tags=["Overview"], dependencies=[Depends(verify_api_key)])
-app.include_router(stats_router, prefix="/api/stats", tags=["Stats"], dependencies=[Depends(verify_api_key)])
+app.include_router(stats_router, prefix="/api/stats", tags=["Stats"], dependencies=[Depends(verify_stats_access)])
 
 # Auth router - PUBLIC (no API key required, used by Dashboard login)
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
