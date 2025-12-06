@@ -31,6 +31,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
 class LoginResponse(BaseModel):
     token: str
     user: dict
@@ -167,6 +172,23 @@ async def logout():
     # JWT is stateless, so just return success
     # Client is responsible for removing the token
     return {"message": "Logged out successfully"}
+
+
+@router.post("/auth/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    """Change current user's password"""
+    if not verify_password(request.old_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Incorrect old password")
+    
+    user.password_hash = hash_password(request.new_password)
+    session.add(user)
+    session.commit()
+    
+    return {"message": "Password updated successfully"}
 
 
 
