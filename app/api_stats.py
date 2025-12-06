@@ -149,6 +149,17 @@ def get_page_ranking(
     
     offset = (page - 1) * per
     
+    # 2.5 Map reco filter values from frontend to database values
+    # Frontend: RECOMMENDED, NOT_RECOMMENDED, UNKNOWN
+    # Database: eligible, ineligible, UNKNOWN
+    reco_mapping = {
+        "RECOMMENDED": "eligible",
+        "NOT_RECOMMENDED": "ineligible",
+        "UNKNOWN": "UNKNOWN",
+        "ALL": "ALL"
+    }
+    reco_db_value = reco_mapping.get(reco, reco) if reco else "ALL"
+    
     # 3. Chuẩn bị Filter Params cho SQL
     # Determine if we need to filter by user's accessible pages
     # - If no user (API key auth from Extension) -> show all
@@ -302,7 +313,7 @@ def get_page_ranking(
         "per": per,
         "offset": offset,
         "search": search,
-        "reco_filter": reco or "ALL",
+        "reco_filter": reco_db_value,
         "size_filter": size or "ALL"
     }
     
