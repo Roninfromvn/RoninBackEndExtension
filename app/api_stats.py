@@ -9,6 +9,8 @@ from sqlmodel import Session, text
 from pydantic import BaseModel
 
 from app.database import get_session
+from app.api_auth import get_optional_user
+from app.models_auth import User
 
 router = APIRouter()
 
@@ -118,9 +120,14 @@ def get_page_ranking(
     search: Optional[str] = Query(None, description="Search by name or ID"),
     reco: Optional[str] = Query("ALL", description="Filter by reco: RECOMMENDED, NOT_RECOMMENDED, UNKNOWN"),
     size: Optional[str] = Query("ALL", description="Filter by size: SMALL, MEDIUM, LARGE"),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_optional_user)
 ):
-    """Get ranked list of active pages with metrics, percentiles and filters"""
+    """Get ranked list of active pages with metrics, percentiles and filters.
+    
+    For ANALYST users, only pages they have access to will be returned.
+    For ADMIN users or API key auth (Extension), all pages are returned.
+    """
     # 1. Xử lý Date Range
     if start and end:
         try:
@@ -143,8 +150,28 @@ def get_page_ranking(
     offset = (page - 1) * per
     
     # 3. Chuẩn bị Filter Params cho SQL
+    # Determine if we need to filter by user's accessible pages
+    # - If no user (API key auth from Extension) -> show all
+    # - If user is ADMIN -> show all  
+    # - If user is ANALYST -> filter by their accessible_page_ids
+    filter_by_user_pages = False
+    user_page_ids: List[str] = []
+    
+    if current_user and current_user.role == "ANALYST":
+        filter_by_user_pages = True
+        user_page_ids = current_user.accessible_page_ids
+        if not user_page_ids:
+            # ANALYST with no pages assigned -> return empty
+            return PageRankingResponse(meta={"page": page, "per": per, "total": 0}, data=[])
+    
+    # Build page filter clause
+    page_filter_clause = ""
+    if filter_by_user_pages:
+        # Create a placeholder list for SQL IN clause
+        page_filter_clause = "AND p.page_id = ANY(:user_page_ids)"
+    
     # Logic Active Page CTE (giữ nguyên logic _POST và _STORY)
-    active_pages_cte = """
+    active_pages_cte = f"""
     active_pages AS (
         SELECT p.page_id, p.page_name, COALESCE(pc.current_reco_status, 'UNKNOWN') AS reco_status
         FROM pages p
@@ -164,6 +191,7 @@ def get_page_ranking(
             WHERE f2.name ILIKE '%_STORY%'
             LIMIT 1
           )
+          {page_filter_clause}
           AND (
               :search IS NULL OR 
               p.page_name ILIKE ('%' || :search || '%') OR 
@@ -268,7 +296,7 @@ def get_page_ranking(
     """
 
     # Thực thi Query
-    result = session.exec(text(query_str), params={
+    query_params = {
         "start_date": start_date,
         "end_date": end_date,
         "per": per,
@@ -276,7 +304,13 @@ def get_page_ranking(
         "search": search,
         "reco_filter": reco or "ALL",
         "size_filter": size or "ALL"
-    })
+    }
+    
+    # Add user_page_ids if filtering by user
+    if filter_by_user_pages:
+        query_params["user_page_ids"] = user_page_ids
+    
+    result = session.exec(text(query_str), params=query_params)
     
     rows = result.fetchall()
     
@@ -316,9 +350,18 @@ def get_page_detail(
     page_id: str,
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_optional_user)
 ):
-    """Get detailed view of a single page with timeseries and top posts"""
+    """Get detailed view of a single page with timeseries and top posts.
+    
+    For ANALYST users, access is denied if they don't have permission to this page.
+    """
+    # Check page access for ANALYST users
+    if current_user and current_user.role == "ANALYST":
+        if page_id not in current_user.accessible_page_ids:
+            raise HTTPException(status_code=403, detail="You don't have access to this page")
+    
     # Parse dates
     if start and end:
         try:
@@ -510,9 +553,18 @@ def get_top_posts(
     end: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_optional_user)
 ):
-    """Get paginated top posts for a page sorted by specified metric"""
+    """Get paginated top posts for a page sorted by specified metric.
+    
+    For ANALYST users, access is denied if they don't have permission to this page.
+    """
+    # Check page access for ANALYST users
+    if current_user and current_user.role == "ANALYST":
+        if page_id not in current_user.accessible_page_ids:
+            raise HTTPException(status_code=403, detail="You don't have access to this page")
+    
     # Validate metric
     valid_metrics = {"reach", "impressions", "clicks", "engagement"}
     if metric not in valid_metrics:

@@ -18,7 +18,11 @@ from app.api_links import router as links_router
 from app.api_pages import router as pages_router
 from app.api_overview import router as overview_router
 from app.api_stats import router as stats_router
+from app.api_auth import router as auth_router
 from app.auth import verify_api_key
+
+# Import auth models to create tables
+from app.models_auth import User, UserPageAccess
 
 app = FastAPI(title="Ronin CMS V2")
 
@@ -57,6 +61,9 @@ app.include_router(links_router, prefix="/api/links", tags=["Links"], dependenci
 app.include_router(pages_router, prefix="/api/pages", tags=["Pages"], dependencies=[Depends(verify_api_key)])
 app.include_router(overview_router, prefix="/api/overview", tags=["Overview"], dependencies=[Depends(verify_api_key)])
 app.include_router(stats_router, prefix="/api/stats", tags=["Stats"], dependencies=[Depends(verify_api_key)])
+
+# Auth router - PUBLIC (no API key required, used by Dashboard login)
+app.include_router(auth_router, prefix="/api", tags=["Auth"])
 
 
 if __name__ == "__main__":
