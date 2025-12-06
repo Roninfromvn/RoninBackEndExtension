@@ -49,7 +49,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Địt con mẹ cả nhà thằng Pháp Lê"}
+    return {"message": "Hello"}
 
 
 # Register Routers
