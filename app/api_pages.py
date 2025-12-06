@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from datetime import datetime, timedelta
 import json
 
 from app.database import get_session
@@ -17,7 +18,7 @@ class PageOutput(BaseModel):
     avatar_url: Optional[str] = None
     folder_ids: List[str] = []
     followers: int = 0
-    reach_yesterday: int = 0
+    reach_7d: int = 0
     note: Optional[str] = None
     has_recommendation: bool = True
 
@@ -66,15 +67,23 @@ def get_all_pages(session: Session = Depends(get_session)):
         # 4. CHỈ LẤY PAGE ĐỦ ĐIỀU KIỆN
         if has_post and has_story:
             # --- LOGIC MỚI: Lấy Stats ---
-            # Lấy record sức khỏe mới nhất của page này
+            # Lấy record sức khỏe mới nhất để lấy followers
             health_record = session.exec(
                 select(PageHealth)
                 .where(PageHealth.page_id == page.page_id)
-                .order_by(PageHealth.record_date.desc()) # Lấy ngày mới nhất
+                .order_by(PageHealth.record_date.desc())
             ).first()
 
             followers_count = health_record.followers_total if health_record else 0
-            reach_count = health_record.total_reach if health_record else 0
+            
+            # Tính tổng reach 7 ngày (giống Analytics)
+            date_cutoff = datetime.now().date() - timedelta(days=7)
+            reach_7d_result = session.exec(
+                select(func.sum(PageHealth.total_reach))
+                .where(PageHealth.page_id == page.page_id)
+                .where(PageHealth.record_date >= date_cutoff)
+            ).first()
+            reach_7d_count = reach_7d_result or 0
             # -----------------------------
 
             output.append({
@@ -83,7 +92,7 @@ def get_all_pages(session: Session = Depends(get_session)):
                 "avatar_url": page.avatar_url,
                 "folder_ids": f_ids,
                 "followers": followers_count,
-                "reach_yesterday": reach_count,
+                "reach_7d": reach_7d_count,
                 "note": config.note if config else None,
                 "has_recommendation": config.has_recommendation if config else True
             })
