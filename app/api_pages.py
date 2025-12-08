@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlmodel import Session, select, func
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 import json
+import os
 
 from app.database import get_session
 from app.models import Page, PageConfig, Folder, PageHealth  # Import thêm PageHealth
 from app.telegram_service import send_telegram_alert
+from app.api_auth import get_optional_user
+from app.models_auth import User
 
 router = APIRouter()
 
@@ -31,11 +34,32 @@ class ConfigUpdate(BaseModel):
 # --- Endpoints ---
 
 @router.get("/", response_model=List[PageOutput])
-def get_all_pages(session: Session = Depends(get_session)):
+def get_all_pages(
+    session: Session = Depends(get_session),
+    current_user: Optional[User] = Depends(get_optional_user),
+    x_ronin_key: str = Header(None)
+):
     """
     Trả về danh sách Page hoạt động (Có cả POST và STORY).
-    Kèm theo dữ liệu Followers và Reach mới nhất từ PageHealth.
+    - Extension (API Key): Trả về tất cả pages
+    - Dashboard ADMIN: Trả về tất cả pages
+    - Dashboard EMPLOYEE/ANALYST: Chỉ trả về pages được assign
     """
+    
+    # Determine if we need to filter by user's accessible pages
+    filter_by_user_pages = False
+    user_page_ids: List[str] = []
+    
+    # Check if request has valid API Key (Extension) -> no filter
+    API_KEY = os.getenv("API_KEY", "DITCONMETHANGPHAPLEDITCONMETHANGPHAPLE")
+    has_valid_api_key = (x_ronin_key == API_KEY)
+    
+    if not has_valid_api_key and current_user and current_user.role != "ADMIN":
+        # Dashboard user (non-admin) -> filter by assigned pages
+        filter_by_user_pages = True
+        user_page_ids = current_user.accessible_page_ids
+        if not user_page_ids:
+            return []  # No pages assigned
     
     # 1. Lấy dữ liệu Page + Config
     results = session.exec(select(Page, PageConfig).join(PageConfig, isouter=True)).all()
@@ -66,6 +90,9 @@ def get_all_pages(session: Session = Depends(get_session)):
         
         # 4. CHỈ LẤY PAGE ĐỦ ĐIỀU KIỆN
         if has_post and has_story:
+            # 4.5 CHECK USER PERMISSION
+            if filter_by_user_pages and page.page_id not in user_page_ids:
+                continue  # Skip pages not assigned to user
             # --- LOGIC MỚI: Lấy Stats ---
             # Lấy record sức khỏe mới nhất để lấy followers
             health_record = session.exec(
