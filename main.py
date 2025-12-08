@@ -58,13 +58,18 @@ def read_root():
 
 
 # Register Routers
+# Extension ONLY - API Key auth
 app.include_router(analytics_router, prefix="/api", tags=["Analytics"], dependencies=[Depends(verify_api_key)])
 app.include_router(extension_router, prefix="/api", tags=["Extension"], dependencies=[Depends(verify_api_key)])
-app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(verify_api_key)])
-app.include_router(config_router, prefix="/api/config", tags=["Config"], dependencies=[Depends(verify_api_key)])
-app.include_router(links_router, prefix="/api/links", tags=["Links"], dependencies=[Depends(verify_api_key)])
-app.include_router(pages_router, prefix="/api/pages", tags=["Pages"], dependencies=[Depends(verify_api_key)])
-app.include_router(overview_router, prefix="/api/overview", tags=["Overview"], dependencies=[Depends(verify_api_key)])
+
+# Dashboard + Extension - Dual auth (API Key OR JWT)
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(verify_stats_access)])
+app.include_router(config_router, prefix="/api/config", tags=["Config"], dependencies=[Depends(verify_stats_access)])
+app.include_router(pages_router, prefix="/api/pages", tags=["Pages"], dependencies=[Depends(verify_stats_access)])
+app.include_router(links_router, prefix="/api/links", tags=["Links"], dependencies=[Depends(verify_stats_access)])
+app.include_router(overview_router, prefix="/api/overview", tags=["Overview"], dependencies=[Depends(verify_stats_access)])
+
+# Stats - Dual auth (already correct)
 app.include_router(stats_router, prefix="/api/stats", tags=["Stats"], dependencies=[Depends(verify_stats_access)])
 
 # Auth router - PUBLIC (no API key required, used by Dashboard login)
