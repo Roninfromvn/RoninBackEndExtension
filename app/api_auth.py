@@ -220,3 +220,245 @@ async def verify_stats_access(
         status_code=401, 
         detail="Unauthorized: Requires Login or API Key"
     )
+
+
+# ========== ADMIN: User Management ==========
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "EMPLOYEE"  # ADMIN, ANALYST, EMPLOYEE
+
+
+class UpdateUserRequest(BaseModel):
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+# Dependency: Require Admin role
+async def require_admin(user: User = Depends(get_current_user)):
+    if user.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+# List all users
+@router.get("/admin/users")
+async def list_users(
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    users = session.exec(select(User)).all()
+    result = []
+    for u in users:
+        # Load page access
+        accesses = session.exec(
+            select(UserPageAccess).where(UserPageAccess.user_id == u.id)
+        ).all()
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "is_active": u.is_active,
+            "page_count": len(accesses)
+        })
+    return result
+
+
+# Create new user
+@router.post("/admin/users")
+async def create_user(
+    request: CreateUserRequest,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    # Validate role
+    valid_roles = ["ADMIN", "ANALYST", "EMPLOYEE"]
+    if request.role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Use: {valid_roles}")
+    
+    # Check duplicate username
+    existing = session.exec(select(User).where(User.username == request.username)).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Create user
+    user = User(
+        username=request.username,
+        password_hash=hash_password(request.password),
+        role=request.role,
+        is_active=True
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    return {"id": user.id, "username": user.username, "role": user.role}
+
+
+# Update user
+@router.patch("/admin/users/{user_id}")
+async def update_user(
+    user_id: int,
+    request: UpdateUserRequest,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if request.role is not None:
+        valid_roles = ["ADMIN", "ANALYST", "EMPLOYEE"]
+        if request.role not in valid_roles:
+            raise HTTPException(status_code=400, detail=f"Invalid role. Use: {valid_roles}")
+        user.role = request.role
+    
+    if request.is_active is not None:
+        user.is_active = request.is_active
+    
+    session.add(user)
+    session.commit()
+    
+    return {"id": user.id, "username": user.username, "role": user.role, "is_active": user.is_active}
+
+
+# Delete user
+@router.delete("/admin/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent self-delete
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    # Delete page access first
+    accesses = session.exec(select(UserPageAccess).where(UserPageAccess.user_id == user_id)).all()
+    for access in accesses:
+        session.delete(access)
+    
+    session.delete(user)
+    session.commit()
+    
+    return {"message": f"User {user.username} deleted"}
+
+
+# ========== ADMIN: Page Assignment ==========
+
+class AssignPagesRequest(BaseModel):
+    page_ids: list[str]
+
+
+# Get user's assigned pages
+@router.get("/admin/users/{user_id}/pages")
+async def get_user_pages(
+    user_id: int,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    accesses = session.exec(
+        select(UserPageAccess).where(UserPageAccess.user_id == user_id)
+    ).all()
+    
+    return {
+        "user_id": user_id,
+        "username": user.username,
+        "page_ids": [a.page_id for a in accesses]
+    }
+
+
+# Assign pages to user (replace all)
+@router.put("/admin/users/{user_id}/pages")
+async def assign_pages(
+    user_id: int,
+    request: AssignPagesRequest,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Clear old assignments
+    old_accesses = session.exec(
+        select(UserPageAccess).where(UserPageAccess.user_id == user_id)
+    ).all()
+    for access in old_accesses:
+        session.delete(access)
+    
+    # Add new assignments
+    for page_id in request.page_ids:
+        access = UserPageAccess(user_id=user_id, page_id=page_id)
+        session.add(access)
+    
+    session.commit()
+    
+    return {
+        "user_id": user_id,
+        "assigned_pages": request.page_ids,
+        "count": len(request.page_ids)
+    }
+
+
+# Add single page to user
+@router.post("/admin/users/{user_id}/pages/{page_id}")
+async def add_page_to_user(
+    user_id: int,
+    page_id: str,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if already assigned
+    existing = session.exec(
+        select(UserPageAccess).where(
+            UserPageAccess.user_id == user_id,
+            UserPageAccess.page_id == page_id
+        )
+    ).first()
+    
+    if existing:
+        return {"message": "Page already assigned"}
+    
+    access = UserPageAccess(user_id=user_id, page_id=page_id)
+    session.add(access)
+    session.commit()
+    
+    return {"message": f"Page {page_id} assigned to user {user.username}"}
+
+
+# Remove single page from user
+@router.delete("/admin/users/{user_id}/pages/{page_id}")
+async def remove_page_from_user(
+    user_id: int,
+    page_id: str,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_admin)
+):
+    access = session.exec(
+        select(UserPageAccess).where(
+            UserPageAccess.user_id == user_id,
+            UserPageAccess.page_id == page_id
+        )
+    ).first()
+    
+    if not access:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    session.delete(access)
+    session.commit()
+    
+    return {"message": f"Page {page_id} removed from user"}

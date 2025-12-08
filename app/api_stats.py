@@ -168,7 +168,7 @@ def get_page_ranking(
     filter_by_user_pages = False
     user_page_ids: List[str] = []
     
-    if current_user and current_user.role == "ANALYST":
+    if current_user and current_user.role != "ADMIN":
         filter_by_user_pages = True
         user_page_ids = current_user.accessible_page_ids
         if not user_page_ids:
@@ -369,7 +369,7 @@ def get_page_detail(
     For ANALYST users, access is denied if they don't have permission to this page.
     """
     # Check page access for ANALYST users
-    if current_user and current_user.role == "ANALYST":
+    if current_user and current_user.role != "ADMIN":
         if page_id not in current_user.accessible_page_ids:
             raise HTTPException(status_code=403, detail="You don't have access to this page")
     
@@ -572,7 +572,7 @@ def get_top_posts(
     For ANALYST users, access is denied if they don't have permission to this page.
     """
     # Check page access for ANALYST users
-    if current_user and current_user.role == "ANALYST":
+    if current_user and current_user.role != "ADMIN":
         if page_id not in current_user.accessible_page_ids:
             raise HTTPException(status_code=403, detail="You don't have access to this page")
     
