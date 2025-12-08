@@ -46,7 +46,11 @@ def on_startup():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://roninfromvn.pp.ua",   # Dashboard production
+        "http://localhost:3000",        # Dashboard local dev
+    ],
+    allow_origin_regex=r"chrome-extension://.*",  # All Chrome extensions
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
