@@ -51,7 +51,7 @@ def get_all_pages(
     user_page_ids: List[str] = []
     
     # Check if request has valid API Key (Extension) -> no filter
-    API_KEY = os.getenv("API_KEY", "DITCONMETHANGPHAPLEDITCONMETHANGPHAPLE")
+    API_KEY = os.getenv("RONIN_API_KEY")
     has_valid_api_key = (x_ronin_key == API_KEY)
     
     if not has_valid_api_key and current_user and current_user.role != "ADMIN":

@@ -6,7 +6,9 @@ async def verify_api_key(x_ronin_key: str = Header(None)):
     """
     Middleware kiểm tra API key từ header X-Ronin-Key
     """
-    API_KEY = os.getenv("API_KEY", "DITCONMETHANGPHAPLEDITCONMETHANGPHAPLE")
+    API_KEY = os.getenv("RONIN_API_KEY")
+    if not API_KEY:
+        raise RuntimeError("❌ RONIN_API_KEY must be set in .env!")
     
     if not x_ronin_key:
         raise HTTPException(

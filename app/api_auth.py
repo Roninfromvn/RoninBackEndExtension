@@ -20,7 +20,10 @@ from app.models_auth import User, UserPageAccess
 router = APIRouter()
 
 # Config
-JWT_SECRET = os.getenv("JWT_SECRET", "ronin-super-secret-key-change-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("❌ JWT_SECRET must be set in .env!")
+
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 7
 
@@ -211,7 +214,7 @@ async def verify_stats_access(
     # Case 2: Extension (API Key)
     # Tự verify key thủ công vì verify_api_key gốc raise lỗi luôn
     import os
-    API_KEY = os.getenv("API_KEY", "DITCONMETHANGPHAPLEDITCONMETHANGPHAPLE")
+    API_KEY = os.getenv("RONIN_API_KEY")
     if x_ronin_key == API_KEY:
         return None # Valid system key (no specific user)
 
